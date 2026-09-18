@@ -128,6 +128,10 @@ const SettingsView = ({
     setWorkingDirectory,
     savingWorkingDirectory,
     setSavingWorkingDirectory,
+    envFile,
+    setEnvFile,
+    savingEnvFile,
+    setSavingEnvFile,
     editorFontConfig,
     setEditorFontConfig,
     uiFontConfig,
@@ -164,6 +168,7 @@ const SettingsView = ({
     handleSaveNodePath,
     handleSaveClaudeCliPath,
     handleSaveWorkingDirectory,
+    handleSaveEnvFile,
     handleUiFontSelectionChange,
     handleSaveUiFontCustomPath,
     handleBrowseUiFontFile,
@@ -348,6 +353,8 @@ const SettingsView = ({
     setSavingClaudeCliPath,
     setWorkingDirectory,
     setSavingWorkingDirectory,
+    setEnvFile,
+    setSavingEnvFile,
     setCommitPrompt,
     setSavingCommitPrompt,
     setCommitAiConfig,
@@ -524,6 +531,10 @@ const SettingsView = ({
               onWorkingDirectoryChange={setWorkingDirectory}
               onSaveWorkingDirectory={handleSaveWorkingDirectory}
               savingWorkingDirectory={savingWorkingDirectory}
+              envFile={envFile}
+              onEnvFileChange={setEnvFile}
+              onSaveEnvFile={handleSaveEnvFile}
+              savingEnvFile={savingEnvFile}
               editorFontConfig={editorFontConfig}
               uiFontConfig={uiFontConfig}
               codeFontConfig={codeFontConfig}

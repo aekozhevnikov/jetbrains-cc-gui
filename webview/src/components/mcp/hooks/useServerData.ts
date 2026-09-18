@@ -346,6 +346,16 @@ export function useServerData({
       window.updateMcpServerStatus = handleServerStatusUpdate;
     }
 
+    // Triggered by the backend file watcher when .mcp.json / mcp.json changes
+    const handleRefreshMcpServers = () => {
+      onLog(t('mcp.logs.refreshOnFileChange'), 'info');
+      loadServers();
+      if (!isCodexMode) {
+        loadServerStatus();
+      }
+    };
+    window.refreshMcpServers = handleRefreshMcpServers;
+
     return () => {
       if (isCodexMode) {
         window.updateCodexMcpServers = undefined;
@@ -354,8 +364,9 @@ export function useServerData({
         window.updateMcpServers = undefined;
         window.updateMcpServerStatus = undefined;
       }
+      window.refreshMcpServers = undefined;
     };
-  }, [isCodexMode, t, onLog, clearToolsForTerminalStatuses, setServers]);
+  }, [isCodexMode, t, onLog, clearToolsForTerminalStatuses, setServers, loadServers, loadServerStatus]);
 
   return {
     // State

@@ -12,6 +12,7 @@ export interface ServerCardProps {
   server: McpServer;
   isExpanded: boolean;
   isCodexMode: boolean;
+  isProjectLocal?: boolean;
   serverStatus: Map<string, McpServerStatusInfo>;
   refreshState?: ServerRefreshState[string];
   toolsInfo?: ServerToolsState[string];
@@ -34,6 +35,7 @@ export function ServerCard({
   server,
   isExpanded,
   isCodexMode,
+  isProjectLocal = false,
   serverStatus,
   toolsInfo,
   t,
@@ -73,6 +75,11 @@ export function ServerCard({
             {getServerInitial(server)}
           </div>
           <span className="server-name">{server.name || server.id}</span>
+          {isProjectLocal && (
+            <span className="project-local-badge" title={t('mcp.projectLocal')}>
+              <span className="codicon codicon-repo"></span> {t('mcp.projectLocal')}
+            </span>
+          )}
           {/* Connection status indicator */}
           <span
             className="status-indicator"
@@ -87,7 +94,7 @@ export function ServerCard({
           </span>
         </div>
         <div className="header-right-section" onClick={(e) => e.stopPropagation()}>
-          {/* Edit button */}
+          {/* Edit button — project-local servers can be edited (saved to .mcp.json) */}
           <button
             className="icon-btn edit-btn"
             onClick={(e) => {
@@ -124,7 +131,10 @@ export function ServerCard({
             <input
               type="checkbox"
               checked={enabled}
-              onChange={(e) => onToggleServer(e.target.checked)}
+              onChange={(e) => {
+                if (!isProjectLocal) onToggleServer(e.target.checked);
+              }}
+              disabled={isProjectLocal}
             />
             <span className="toggle-slider"></span>
           </label>
