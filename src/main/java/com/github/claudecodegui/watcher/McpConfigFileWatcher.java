@@ -49,7 +49,9 @@ public class McpConfigFileWatcher implements BulkFileListener {
     }
 
     private boolean isMcpConfigFile(VirtualFile file) {
-        if (file == null) return false;
+        if (file == null) {
+            return false;
+        }
         String name = file.getName();
         return name.equals(".mcp.json") || name.equals("mcp.json");
     }

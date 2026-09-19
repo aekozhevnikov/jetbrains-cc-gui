@@ -909,9 +909,9 @@ public class GrokSDKBridge extends BaseSDKBridge {
         );
         String stdinJson = gson.toJson(stdinInput);
         if (stdinInput.has("envFile")) {
-            System.err.println("[DEBUG] GrokSDKBridge (per-process): envFile in stdin=" + stdinInput.get("envFile").getAsString());
+            LOG.debug("[GrokSDKBridge (per-process)] envFile in stdin=" + stdinInput.get("envFile").getAsString());
         } else {
-            System.err.println("[DEBUG] GrokSDKBridge (per-process): envFile NOT in stdin JSON");
+            LOG.debug("[GrokSDKBridge (per-process)] envFile NOT in stdin JSON");
         }
         List<String> command = buildBaseCommand("send");
         LOG.info("[Grok] sendMessage (fallback) sessionId=" + (sessionId != null ? sessionId : "(new)")
@@ -931,12 +931,12 @@ public class GrokSDKBridge extends BaseSDKBridge {
                     java.io.File defaultEnvFile = new java.io.File(cwd, ".env");
                     if (defaultEnvFile.exists() && defaultEnvFile.isFile()) {
                         envFile = defaultEnvFile.getAbsolutePath();
-                        System.err.println("[DEBUG] GrokSDKBridge.resolveEnvFile: auto-discovered default .env at " + envFile);
+                        LOG.debug("[GrokSDKBridge.resolveEnvFile] auto-discovered default .env at " + envFile);
                     } else {
-                        System.err.println("[DEBUG] GrokSDKBridge.resolveEnvFile: no env file configured and no .env found in cwd");
+                        LOG.debug("[GrokSDKBridge.resolveEnvFile] no env file configured and no .env found in cwd");
                     }
                 } else {
-                    System.err.println("[DEBUG] GrokSDKBridge.resolveEnvFile: envFile is null and no cwd for default discovery");
+                    LOG.debug("[GrokSDKBridge.resolveEnvFile] envFile is null and no cwd for default discovery");
                 }
             } else {
                 // Resolve relative env file paths against the project cwd
@@ -945,7 +945,7 @@ public class GrokSDKBridge extends BaseSDKBridge {
                     envFileObj = new java.io.File(cwd, envFile);
                     envFile = envFileObj.getAbsolutePath();
                 }
-                System.err.println("[DEBUG] GrokSDKBridge.resolveEnvFile: envFile=" + envFile);
+                LOG.debug("[GrokSDKBridge.resolveEnvFile] envFile=" + envFile);
             }
             return envFile;
         } catch (Exception e) {
@@ -1088,7 +1088,7 @@ public class GrokSDKBridge extends BaseSDKBridge {
         if (envFile != null && !envFile.isEmpty()) {
             stdinInput.addProperty("envFile", envFile);
         } else {
-            System.err.println("[DEBUG] GrokSDKBridge.buildStdinPayloadForDaemon: envFile is null/empty");
+            LOG.debug("[GrokSDKBridge.buildStdinPayloadForDaemon] envFile is null/empty");
         }
         if (openedFiles != null) {
             stdinInput.add("openedFiles", openedFiles);

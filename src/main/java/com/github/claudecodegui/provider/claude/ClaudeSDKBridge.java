@@ -449,12 +449,12 @@ public class ClaudeSDKBridge extends BaseSDKBridge {
                     java.io.File defaultEnvFile = new java.io.File(cwd, ".env");
                     if (defaultEnvFile.exists() && defaultEnvFile.isFile()) {
                         envFile = defaultEnvFile.getAbsolutePath();
-                        System.err.println("[DEBUG] ClaudeSDKBridge.resolveEnvFile: auto-discovered default .env at " + envFile);
+                        LOG.debug("[ClaudeSDKBridge.resolveEnvFile] auto-discovered default .env at " + envFile);
                     } else {
-                        System.err.println("[DEBUG] ClaudeSDKBridge.resolveEnvFile: no env file configured and no .env found in cwd");
+                        LOG.debug("[ClaudeSDKBridge.resolveEnvFile] no env file configured and no .env found in cwd");
                     }
                 } else {
-                    System.err.println("[DEBUG] ClaudeSDKBridge.resolveEnvFile: envFile is null and no cwd for default discovery");
+                    LOG.debug("[ClaudeSDKBridge.resolveEnvFile] envFile is null and no cwd for default discovery");
                 }
             } else {
                 // Resolve relative env file paths against the project cwd
@@ -463,7 +463,7 @@ public class ClaudeSDKBridge extends BaseSDKBridge {
                     envFileObj = new java.io.File(cwd, envFile);
                     envFile = envFileObj.getAbsolutePath();
                 }
-                System.err.println("[DEBUG] ClaudeSDKBridge.resolveEnvFile: envFile=" + envFile);
+                LOG.debug("[ClaudeSDKBridge.resolveEnvFile] envFile=" + envFile);
             }
             return envFile;
         } catch (Exception e) {

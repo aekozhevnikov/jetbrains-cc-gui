@@ -80,7 +80,7 @@ class ClaudeDaemonRequestExecutor {
                 );
 
                 boolean hasAttachments = attachments != null && !attachments.isEmpty() && params.has("attachments");
-                System.err.println("[DEBUG] ClaudeDaemonRequestExecutor: envFile before buildDaemonEnv=" + envFile);
+                log.debug("[ClaudeDaemonRequestExecutor] envFile before buildDaemonEnv=" + envFile);
                 params.add("env", ClaudeBridgeUtils.buildDaemonEnv(cwd, envFile));
 
                 String method = hasAttachments ? "claude.sendWithAttachments" : "claude.send";

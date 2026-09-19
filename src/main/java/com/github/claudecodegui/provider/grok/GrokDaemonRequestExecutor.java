@@ -73,9 +73,9 @@ class GrokDaemonRequestExecutor {
                 JsonObject envObj = new JsonObject();
                 if (envFile != null && !envFile.isEmpty()) {
                     envObj.addProperty("envFile", envFile);
-                    System.err.println("[DEBUG] GrokDaemonRequestExecutor: envFile set in daemon env=" + envFile);
+                    log.debug("[GrokDaemonRequestExecutor] envFile set in daemon env=" + envFile);
                 } else {
-                    System.err.println("[DEBUG] GrokDaemonRequestExecutor: envFile is null/empty — not adding to daemon env");
+                    log.info("[GrokDaemonRequestExecutor] envFile is null/empty — not adding to daemon env");
                 }
                 params.add("env", envObj); // daemon will merge base env
 

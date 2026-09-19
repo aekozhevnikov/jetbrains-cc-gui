@@ -119,9 +119,9 @@ class ClaudeProcessInvoker {
                 );
                 String stdinJson = gson.toJson(stdinInput);
                 if (stdinInput.has("envFile")) {
-                    System.err.println("[DEBUG] ClaudeProcessInvoker: envFile in stdin=" + stdinInput.get("envFile").getAsString());
+                    log.debug("[ClaudeProcessInvoker] envFile in stdin=" + stdinInput.get("envFile").getAsString());
                 } else {
-                    System.err.println("[DEBUG] ClaudeProcessInvoker: envFile NOT in stdin JSON");
+                    log.debug("[ClaudeProcessInvoker] envFile NOT in stdin JSON");
                 }
                 String preview = logSanitizer.buildPreview(stdinJson, 500);
                 log.debug("[PROMPT] Sending to Node.js (" + stdinJson.length() + " chars):\n" + preview);

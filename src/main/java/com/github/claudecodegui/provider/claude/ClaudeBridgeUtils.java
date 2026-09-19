@@ -13,6 +13,8 @@ import java.nio.charset.StandardCharsets;
  */
 final class ClaudeBridgeUtils {
 
+    private static final Logger LOG = Logger.getInstance(ClaudeBridgeUtils.class);
+
     private ClaudeBridgeUtils() {
     }
 
@@ -38,7 +40,7 @@ final class ClaudeBridgeUtils {
         if (envFile != null && !envFile.isEmpty() && !"null".equals(envFile) && !"undefined".equals(envFile)) {
             envVars.addProperty("envFile", envFile);
         } else {
-            System.err.println("[DEBUG] ClaudeBridgeUtils.buildDaemonEnv: envFile is null/empty/\"null\"/\"undefined\" (value=" + envFile + ")");
+            LOG.debug("[ClaudeBridgeUtils.buildDaemonEnv] envFile is null/empty/\"null\"/\"undefined\" (value=" + envFile + ")");
         }
         return envVars;
     }
