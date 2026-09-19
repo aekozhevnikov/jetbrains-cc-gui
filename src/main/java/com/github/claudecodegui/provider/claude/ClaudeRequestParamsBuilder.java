@@ -35,6 +35,25 @@ class ClaudeRequestParamsBuilder {
             Boolean disableThinking,
             String reasoningEffort
     ) {
+        return buildSendParams(message, sessionId, runtimeSessionEpoch, cwd, permissionMode, model,
+                attachments, openedFiles, agentPrompt, streaming, disableThinking, reasoningEffort, null);
+    }
+
+    JsonObject buildSendParams(
+            String message,
+            String sessionId,
+            String runtimeSessionEpoch,
+            String cwd,
+            String permissionMode,
+            String model,
+            List<ClaudeSession.Attachment> attachments,
+            JsonObject openedFiles,
+            String agentPrompt,
+            Boolean streaming,
+            Boolean disableThinking,
+            String reasoningEffort,
+            String envFile
+    ) {
         JsonObject params = new JsonObject();
         params.addProperty("message", message);
         params.addProperty("sessionId", sessionId != null ? sessionId : "");
@@ -62,6 +81,11 @@ class ClaudeRequestParamsBuilder {
         }
         if (reasoningEffort != null && !reasoningEffort.trim().isEmpty()) {
             params.addProperty("reasoningEffort", reasoningEffort);
+        }
+        if (envFile != null && !envFile.isEmpty() && !"null".equals(envFile) && !"undefined".equals(envFile)) {
+            params.addProperty("envFile", envFile);
+        } else {
+            System.err.println("[DEBUG] ClaudeRequestParamsBuilder: envFile is null/empty/notValid (value=" + envFile + ")");
         }
 
         return params;
