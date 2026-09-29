@@ -113,6 +113,9 @@ interface BasicConfigSectionProps {
   // Detailed output information configuration
   detailedOutputEnabled?: boolean;
   onDetailedOutputEnabledChange?: (enabled: boolean) => void;
+  // Auto-convert SDK sessions to CLI sessions on exit
+  autoConvertSessionsOnExit?: boolean;
+  onAutoConvertSessionsOnExitChange?: (enabled: boolean) => void;
   systemNotificationOnlyWhenUnfocused?: boolean;
   onSystemNotificationOnlyWhenUnfocusedChange?: (enabled: boolean) => void;
   askUserQuestionSoundNotificationEnabled?: boolean;
@@ -215,6 +218,8 @@ const BasicConfigSection = (props: BasicConfigSectionProps) => {
           onAskUserQuestionNotificationEnabledChange={props.onAskUserQuestionNotificationEnabledChange}
           detailedOutputEnabled={props.detailedOutputEnabled}
           onDetailedOutputEnabledChange={props.onDetailedOutputEnabledChange}
+          autoConvertSessionsOnExit={props.autoConvertSessionsOnExit}
+          onAutoConvertSessionsOnExitChange={props.onAutoConvertSessionsOnExitChange}
           systemNotificationOnlyWhenUnfocused={props.systemNotificationOnlyWhenUnfocused}
           onSystemNotificationOnlyWhenUnfocusedChange={props.onSystemNotificationOnlyWhenUnfocusedChange}
           askUserQuestionSoundNotificationEnabled={props.askUserQuestionSoundNotificationEnabled}
