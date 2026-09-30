@@ -1086,9 +1086,6 @@
       "claude-vscode": "Cette session a été créée par l'extension VS Code et n'est pas affichée dans CLI par défaut. Cliquez sur 'Convertir en CLI' pour qu'elle apparaisse dans la liste /resume du CLI du terminal",
       "remote": "Cette session a été créée par une instance distante de Claude Code"
     },
-    "loadMore": "Load more",
-    "sessionInUse": "Les sessions en cours d'utilisation ne peuvent pas être supprimées.",
-    "deleteFailed": "Impossible de supprimer la session. Veuillez réessayer.",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

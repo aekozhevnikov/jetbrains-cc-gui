@@ -1086,9 +1086,6 @@
       "claude-vscode": "यह सत्र VS Code एक्सटेंशन द्वारा बनाया गया था और CLI में डिफ़ॉल्ट रूप से नहीं दिखाया गया है। टर्मिनल CLI की /resume सूची में इसे दिखाने के लिए 'CLI में कनवर्ट करें' पर क्लिक करें",
       "remote": "यह सत्र Claude Code के रिमोट इंस्टेंस द्वारा बनाया गया था"
     },
-    "loadMore": "Load more",
-    "sessionInUse": "उपयोग में चल रहे सत्र हटाए नहीं जा सकते।",
-    "deleteFailed": "सत्र हटाया नहीं जा सका। कृपया फिर से प्रयास करें।",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

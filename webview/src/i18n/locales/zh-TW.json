@@ -1127,9 +1127,6 @@
       "claude-vscode": "此會話由 VS Code 插件創建，CLI 默認不顯示。點擊「轉為CLI」可使其出現在終端 CLI 的 /resume 列表中",
       "remote": "此會話由遠程 Claude Code 實例創建"
     },
-    "loadMore": "載入更多",
-    "sessionInUse": "會話正在使用中，無法刪除。",
-    "deleteFailed": "刪除會話失敗，請重試。",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

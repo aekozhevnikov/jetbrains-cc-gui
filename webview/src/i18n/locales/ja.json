@@ -1091,9 +1091,6 @@
       "claude-vscode": "このセッションはVS Code拡張機能によって作成されており、CLIではデフォルトで表示されません。ターミナルCLIの/resumeリストに表示するには「CLIに変換」をクリックしてください",
       "remote": "このセッションはリモートのClaude Codeインスタンスによって作成されました"
     },
-    "loadMore": "Load more",
-    "sessionInUse": "使用中のセッションは削除できません。",
-    "deleteFailed": "セッションを削除できませんでした。もう一度お試しください。",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

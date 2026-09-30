@@ -1540,9 +1540,6 @@
       "minutesAgo": "分钟前",
       "secondsAgo": "秒前"
     },
-    "loadMore": "加载更多",
-    "sessionInUse": "会话正在使用中，无法删除。",
-    "deleteFailed": "删除会话失败，请重试。",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

@@ -1171,9 +1171,6 @@
       "claude-vscode": "이 세션은 VS Code 확장에서 생성되었으며 CLI에 기본적으로 표시되지 않습니다. 터미널 CLI의 /resume 목록에 표시하려면 'CLI로 변환'을 클릭하세요",
       "remote": "이 세션은 원격 Claude Code 인스턴스에서 생성되었습니다"
     },
-    "loadMore": "Load more",
-    "sessionInUse": "사용 중인 세션은 삭제할 수 없습니다.",
-    "deleteFailed": "세션을 삭제하지 못했습니다. 다시 시도해 주세요.",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",

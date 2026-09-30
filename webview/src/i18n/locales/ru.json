@@ -1113,9 +1113,6 @@
       "claude-vscode": "Этот сеанс был создан расширением VS Code и по умолчанию не отображается в CLI. Нажмите 'Преобразовать в CLI', чтобы он появился в списке /resume терминала CLI",
       "remote": "Этот сеанс был создан удаленным экземпляром Claude Code"
     },
-    "loadMore": "Load more",
-    "sessionInUse": "Используемые чаты нельзя удалить.",
-    "deleteFailed": "Не удалось удалить чат. Повторите попытку.",
     "convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",
