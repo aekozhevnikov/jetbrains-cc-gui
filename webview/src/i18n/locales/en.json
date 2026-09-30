@@ -1416,7 +1416,8 @@
     "convertAllSuccess": "{{count}} session(s) converted, now visible in CLI /resume",
     "convertAllPartial": "Converted {{count}} of {{total}} session(s), {{failed}} failed",
     "convertAllAlreadyRunning": "A conversion is already running, please wait for it to finish",
-    "convertAllTimeout": "The conversion took too long. The list has been refreshed, please check it in a moment."
+    "convertAllTimeout": "The conversion took too long. The list has been refreshed, please check it in a moment.",
+    "convertAllBridgeUnavailable": "The bridge to the IDE is unavailable, so the request was not sent"
   },
   "permission": {
     "dialogTitle": "Permission Request",

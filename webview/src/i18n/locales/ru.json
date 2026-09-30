@@ -971,6 +971,7 @@
     "convertAllPartial": "Преобразовано {{count}} из {{total}} сессий, с ошибкой — {{failed}}",
     "convertAllAlreadyRunning": "Преобразование уже выполняется, дождитесь его завершения",
     "convertAllTimeout": "Преобразование заняло слишком много времени. Список обновлён, проверьте его немного позже.",
+    "convertAllBridgeUnavailable": "Связь с IDE недоступна, запрос не отправлен",
     "convertSuccess": "Сессия преобразована для распознавания CLI",
     "convertFailed": "Ошибка преобразования",
     "confirmConvert": "Преобразовать в сессию CLI?",

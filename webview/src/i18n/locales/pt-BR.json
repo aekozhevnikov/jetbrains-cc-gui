@@ -1106,6 +1106,7 @@
     "convertAllPartial": "Convertidas {{count}} de {{total}} sessão(ões), {{failed}} com falha",
     "convertAllAlreadyRunning": "Uma conversão já está em andamento, aguarde a conclusão",
     "convertAllTimeout": "A conversão demorou demais. A lista foi atualizada, verifique em breve.",
+    "convertAllBridgeUnavailable": "A ponte para o IDE está indisponível, a solicitação não foi enviada",
     "convertSuccess": "Sessão convertida para ser reconhecida pelo CLI",
     "convertFailed": "Falha na conversão",
     "confirmConvert": "Converter para sessão CLI?",

@@ -530,7 +530,7 @@
         "hint": "开启后，消息底部会在可用时显示本轮预估费用，并在输入 Token 中标明缓存命中。Token 消耗信息始终保持显示。"
       },
       "autoConvertSessionsOnExit": {
-        "label": "退出时自动转换会话为 CLI",
+        "label": "退出时自动将会话转换为 CLI",
         "enabled": "已开启",
         "disabled": "已关闭",
         "hint": "插件通过 SDK 创建的会话不会出现在 Claude Code CLI 的 /resume 列表中，因为它们的 entrypoint 是 sdk-cli。开启后，会在关闭 IDE 时自动转换。"
@@ -1421,7 +1421,8 @@
     "convertAllSuccess": "已转换 {{count}} 个会话，现在可在 CLI 的 /resume 中显示",
     "convertAllPartial": "已转换 {{total}} 个会话中的 {{count}} 个，{{failed}} 个失败",
     "convertAllAlreadyRunning": "已有转换正在进行，请等待完成",
-    "convertAllTimeout": "转换耗时过长。列表已刷新，请稍后查看。"
+    "convertAllTimeout": "转换耗时过长。列表已刷新，请稍后查看。",
+    "convertAllBridgeUnavailable": "与 IDE 的连接不可用，请求未发送"
   },
   "permission": {
     "dialogTitle": "权限请求",

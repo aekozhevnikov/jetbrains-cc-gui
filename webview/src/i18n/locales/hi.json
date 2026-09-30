@@ -959,6 +959,7 @@
     "convertAllPartial": "{{total}} में से {{count}} सत्र कन्वर्ट हुए, {{failed}} विफल",
     "convertAllAlreadyRunning": "एक रूपांतरण पहले से चल रहा है, कृपया उसके पूरा होने तक प्रतीक्षा करें",
     "convertAllTimeout": "रूपांतरण में बहुत अधिक समय लग गया। सूची ताज़ा कर दी गई है, कृपया थोड़ी देर बाद देखें।",
+    "convertAllBridgeUnavailable": "IDE से कनेक्शन उपलब्ध नहीं है, अनुरोध नहीं भेजा गया",
     "convertSuccess": "सेशन CLI पहचान में बदल दिया गया",
     "convertFailed": "रूपांतरण विफल",
     "confirmConvert": "CLI सेशन में बदलें?",

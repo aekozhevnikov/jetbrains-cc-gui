@@ -1053,6 +1053,7 @@
     "convertAllPartial": "총 {{total}}개 중 {{count}}개 변환됨, {{failed}}개 실패",
     "convertAllAlreadyRunning": "이미 변환이 진행 중입니다. 완료될 때까지 기다려 주세요",
     "convertAllTimeout": "변환 시간이 너무 오래 걸렸습니다. 목록을 새로 고쳤으니 잠시 후 확인해 주세요.",
+    "convertAllBridgeUnavailable": "IDE 연결을 사용할 수 없어 요청이 전송되지 않았습니다",
     "convertSuccess": "세션이 CLI 인식 가능으로 변환되었습니다",
     "convertFailed": "변환 실패",
     "confirmConvert": "CLI 세션으로 변환하시겠습니까?",

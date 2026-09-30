@@ -964,6 +964,7 @@
     "convertAllPartial": "{{total}} 件中 {{count}} 件を変換しました。{{failed}} 件は失敗しました",
     "convertAllAlreadyRunning": "別の変換を実行中です。完了までお待ちください",
     "convertAllTimeout": "変換に時間がかかりすぎました。一覧を更新しました。しばらくしてからご確認ください。",
+    "convertAllBridgeUnavailable": "IDE への接続が利用できないため、リクエストは送信されませんでした",
     "convertSuccess": "セッションをCLI認識可能に変換しました",
     "convertFailed": "変換に失敗しました",
     "confirmConvert": "CLIセッションに変換しますか？",
