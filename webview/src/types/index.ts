@@ -138,6 +138,8 @@ export interface HistoryData {
   sessions?: HistorySessionSummary[];
   total?: number;
   favorites?: Record<string, { favoritedAt: number }>;
+  /** Native Codex history source; drives native-aware deduplication. */
+  source?: 'native' | 'legacy';
 }
 
 // File changes types

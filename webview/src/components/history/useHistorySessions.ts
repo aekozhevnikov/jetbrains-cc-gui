@@ -10,7 +10,7 @@ const getComparableTimestamp = (timestamp: string | undefined) => {
   return Number.isNaN(value) ? 0 : value;
 };
 
-const deduplicateHistorySessions = (sessions: HistorySessionSummary[]) => {
+const deduplicateHistorySessions = (sessions: HistorySessionSummary[], nativeHistory: boolean) => {
   const deduplicated = new Map<string, HistorySessionSummary>();
 
   for (const session of sessions) {
@@ -32,7 +32,9 @@ const deduplicateHistorySessions = (sessions: HistorySessionSummary[]) => {
     deduplicated.set(session.sessionId, {
       ...preferred,
       title: preferred.title || fallback.title,
-      messageCount: Math.max(preferred.messageCount || 0, fallback.messageCount || 0),
+      // A newer native revision may be unknown or shorter after a rollback; older counts cannot fill it.
+      messageCount: nativeHistory ? preferred.messageCount : preferred.messageCount === undefined ? fallback.messageCount
+        : fallback.messageCount === undefined ? preferred.messageCount : Math.max(preferred.messageCount, fallback.messageCount),
       isFavorited: preferred.isFavorited || fallback.isFavorited,
       favoritedAt: Math.max(preferred.favoritedAt || 0, fallback.favoritedAt || 0) || undefined,
       provider: preferred.provider || fallback.provider,
@@ -52,8 +54,8 @@ export const useHistorySessions = (historyData: HistoryData | null, searchQuery:
   // list, never the filtered one — otherwise the button claims "nothing to convert" while
   // the click would have converted N sessions.
   const allSessions = useMemo(
-    () => deduplicateHistorySessions(historyData?.sessions ?? []),
-    [historyData?.sessions]
+    () => deduplicateHistorySessions(historyData?.sessions ?? [], historyData?.source === 'native'),
+    [historyData?.sessions, historyData?.source]
   );
 
   // Sort and filter sessions: favorited on top (by favorite time descending), unfavorited below (original order)
@@ -78,7 +80,7 @@ export const useHistorySessions = (historyData: HistoryData | null, searchQuery:
 
   const infoBar = !historyData
     ? ''
-    : t('history.totalSessions', {
+    : t(historyData.total === undefined ? 'history.totalSessionsOnly' : 'history.totalSessions', {
         count: sessions.length,
         total: historyData.total ?? 0,
       });

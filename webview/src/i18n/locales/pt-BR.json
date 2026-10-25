@@ -125,8 +125,27 @@
       "messagesFrom": "{{count}} mensagens resumidas a partir deste ponto",
       "userContext": "Contexto: \"{{context}}\"",
       "expand": "Expandir resumo",
-      "collapse": "Recolher resumo"
-    }
+      "collapse": "Recolher resumo",
+      "receivedTime": "Hora registrada",
+      "nativeCompleted": "Contexto compactado",
+      "nativeInProgress": "Compactando contexto",
+      "nativeFailed": "Falha na compactação",
+      "nativeInterrupted": "Compactação interrompida",
+      "writerOccupied": "O bloqueio nativo de escrita desta conversa está ocupado. Ele pode estar retido pelo ambiente de execução deste plugin ou por outro processo do Codex. Verifique se a conversa continua carregada em outra janela ou em segundo plano.",
+      "manual": "Manual",
+      "auto": "Automática",
+      "timeUnknown": "Hora desconhecida",
+      "turnTime": "Início do turno"
+    },
+    "pasteImagePreparing": "Preparando imagem colada...",
+    "codexCompactUsage": "Use /compact without arguments",
+    "codexCompactStarted": "Codex is compacting the conversation",
+    "codexReviewUsage": "Use /review without arguments",
+    "codexReviewStarted": "Codex is reviewing the workspace",
+    "codexDiffUsage": "Use /diff without arguments",
+    "codexApprovalsUsage": "Use /approvals without arguments",
+    "codexSandboxConflict": "Codex automatic review cannot use danger-full-access. Choose workspace-write or request approval.",
+    "continueRefiningPlan": "Continuar refinando este plano:"
   },
   "settings": {
     "title": "Configurações",
@@ -454,7 +473,10 @@
       "uninstallSuccess": "{{name}} foi desinstalado",
       "uninstallFailed": "Falha ao desinstalar: {{error}}",
       "updating": "Atualizando...",
-      "updateSuccess": "{{name}} atualizado com sucesso"
+      "updateSuccess": "{{name}} atualizado com sucesso",
+      "codexMigratedTitle": "O Codex foi movido para Gerenciamento de Provedores → CLI",
+      "codexMigratedDesc": "O Codex não instala mais um SDK aqui: ele usa a CLI do Codex já instalada na sua máquina (@openai/codex) e o chat roda pelo app-server oficial. Veja o status em Gerenciamento de Provedores → CLI; se ainda não estiver instalada, execute npm install -g @openai/codex no terminal e clique em Re-check nessa página.",
+      "cliTransportBadge": "CLI · {{transport}}"
     },
     "usage": "Estatísticas de Uso",
     "usageDesc": "Visualize o consumo de Tokens, estatísticas de custo e análise de tendência de uso",
@@ -471,7 +493,13 @@
       "fullAccessTitle": "danger-full-access",
       "fullAccessDesc": "Permite maior acesso ao sistema, adequado para comandos como adb ou docker que requerem permissões extras.",
       "hint": "Esta configuração afeta apenas o sandbox do processo Codex e não altera o comportamento de permissões do Claude Code.",
-      "claudeTip": "O modo de aprovação do Claude Code é configurado pelo seletor de modo na entrada do chat."
+      "claudeTip": "O modo de aprovação do Claude Code é configurado pelo seletor de modo na entrada do chat.",
+      "desired": "Desired: {{mode}}",
+      "effective": "Effective: {{mode}}",
+      "conflict": "Native policy rejected the requested access range.",
+      "source": "Source: {{source}}",
+      "readOnlyTitle": "Read only",
+      "readOnlyDesc": "Inspect files without writing to the workspace."
     },
     "commit": {
       "title": "IA para Commits",
@@ -1031,6 +1059,10 @@
         "omp": {
           "name": "OMP CLI",
           "description": "Agente de codificação de terminal Oh My Pi com suporte a múltiplos provedores"
+        },
+        "codex": {
+          "name": "Codex CLI",
+          "description": "Detecta o Codex CLI instalado. A consulta de versão não lê a configuração da conta; o chat usa app-server."
         }
       },
       "installDialog": {
@@ -1140,7 +1172,10 @@
       "remote": "Esta sessão foi criada por uma instância remota do Claude Code"
     },
     "convertActiveHint": "Converter para CLI após encerrar a sessão",
-    "convertActiveHintTooltip": "Encerre ou feche esta sessão primeiro e depois converta-a pelo histórico"
+    "convertActiveHintTooltip": "Encerre ou feche esta sessão primeiro e depois converta-a pelo histórico",
+    "totalSessionsOnly": "{{count}} sessões",
+    "messageCountUnknown": "Contagem de mensagens indisponível",
+    "loadMore": "Load more"
   },
   "permission": {
     "dialogTitle": "Solicitação de Permissão",
@@ -1162,7 +1197,12 @@
       "execute": "Executar {{toolName}}",
       "readDirectory": "Ler Diretório",
       "timeoutWarning": "Por favor, responda em breve, o diálogo fechará em {{seconds}} segundos"
-    }
+    },
+    "userCancelled": "Permission request cancelled",
+    "previewUnavailable": "Native file preview is unavailable. You can deny or cancel this request.",
+    "requestedPermissions": "Requested native permissions",
+    "allowWithRule": "Allow with this command rule",
+    "allowWithNetworkRule": "Allow with this network rule"
   },
   "askUserQuestion": {
     "title": "Claude tem algumas perguntas para você",
@@ -1263,7 +1303,20 @@
       "killFailed": "Falha ao encerrar: {{error}}",
       "activeRequests": "{{count}} em andamento"
     },
-    "link": "Link"
+    "link": "Link",
+    "codexQuota": {
+      "title": "Cota do Codex",
+      "loading": "Carregando cota...",
+      "unavailable": "Cota indisponível",
+      "lastUpdated": "Atualizado {{value}}",
+      "fiveHour": "Uso de 5 h",
+      "weekly": "Uso semanal",
+      "windowRemainingPercent": "{{percent}}% restante",
+      "windowRemainingPercentWithReset": "{{percent}}% restante · Reinicia {{value}}",
+      "windowUsedOnly": "{{used}} usados",
+      "windowUnavailable": "Indisponível",
+      "apiKeyMode": "O modo de chave de API não tem cota de assinatura"
+    }
   },
   "markdown": {
     "copyCode": "Copiar código",
@@ -1481,7 +1534,8 @@
     "noParams": "Sem Parâmetros",
     "required": "Obrigatório",
     "optional": "Opcional",
-    "refreshServer": "Atualizar {{name}}"
+    "refreshServer": "Atualizar {{name}}",
+    "nativeStatus": "Native Codex MCP status"
   },
   "tools": {
     "toolCall": "Chamada de Ferramenta",
@@ -1551,6 +1605,20 @@
       "expandReport": "Expandir constatações",
       "collapseReport": "Recolher constatações",
       "untitled": "Constatação sem título"
+    },
+    "commandRead": "Ler {{path}}",
+    "commandList": "Listar {{path}}",
+    "commandSearch": "Buscar {{query}} em {{path}}",
+    "commandApprovalReason": "Motivo da aprovação",
+    "patchToggleDiff": "Ver alterações",
+    "errorOutput": "Detalhes do erro",
+    "resultUnknown": "Resultado individual da ferramenta indisponível",
+    "patchNoDiff": "Diferenças indisponíveis",
+    "patchKind": {
+      "add": "Adicionado",
+      "delete": "Excluído",
+      "update": "Atualizado",
+      "move": "Movido"
     }
   },
   "todo": {
@@ -1790,6 +1858,10 @@
       "fable5": {
         "label": "Fable 5",
         "description": "Fable 5 · Geração anterior do Fable"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Upgrade mais recente do Sonnet"
       }
     },
     "longContext": {
@@ -1830,8 +1902,14 @@
       "gpt54": {
         "label": "GPT-5.4",
         "description": "Modelo de fronteira mais recente com capacidades aprimoradas."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "Modelo de fronteira GPT-6.1 para trabalho profissional complexo."
       }
-    }
+    },
+    "clearSearch": "Limpar pesquisa",
+    "noSearchMatches": "Nenhum modelo corresponde a \"{{query}}\""
   },
   "modes": {
     "default": {
@@ -2116,6 +2194,46 @@
           "step1": "2. Abra Gerenciamento de Dependências e reinstale o SDK mais recente:"
         }
       }
+    },
+    "codexCliUnavailable": {
+      "title": "Não foi possível iniciar o Codex CLI",
+      "intro": "O runtime do Codex CLI encerrou antes de responder. O erro acima mostra o caminho do CLI que falhou e a própria saída dele. Normalmente é uma instalação incompleta do Codex CLI, não um bug do plugin.",
+      "reason": "O plugin inicia o \"codex app-server\" a partir do Codex CLI encontrado na sua máquina. Uma cópia instalada pela metade - por exemplo, uma instalação global do npm sem o binário da plataforma - termina com código 1 e derruba o turno junto.",
+      "solutions": {
+        "reinstallCodexCli": {
+          "title": "Opção 1: instalar ou atualizar o CLI usando as instruções oficiais",
+          "step0": "1. Abra as instruções oficiais e escolha o instalador independente, o npm ou o Homebrew para o seu ambiente de execução. Atualize pelo canal de instalação original; não execute npm uninstall em uma instalação independente:",
+          "step1": "2. Confira a versão em um novo terminal, atualize Gerenciamento de Provedores → CLI e envie novamente:"
+        },
+        "pointCodexBin": {
+          "title": "Opção 2: apontar o plugin para um binário que funcione",
+          "step0": "Liste todos os codex do seu PATH (no Windows: where codex). Se o que funciona não for o primeiro, defina a variável de ambiente CODEX_BIN com o caminho completo e reinicie a IDE. O plugin também passa automaticamente para instalações posteriores."
+        }
+      }
+    }
+  },
+  "workspaceDiff": {
+    "title": "Alterações do espaço de trabalho",
+    "staged": "Preparadas",
+    "unstaged": "Não preparadas",
+    "untracked": "Não rastreados",
+    "noChanges": "Nenhuma alteração detectada",
+    "binary": "Binário",
+    "truncated": "O snapshot do espaço de trabalho era muito grande e foi truncado",
+    "notGit": "O diretório atual não é uma árvore de trabalho Git",
+    "refresh": "Atualizar",
+    "fileCount": "{{count}} arquivos",
+    "fileCount_one": "{{count}} arquivo",
+    "fileCount_many": "{{count}} arquivos",
+    "fileCount_other": "{{count}} arquivos"
+  },
+  "codex": {
+    "plan": {
+      "title": "Codex plan",
+      "ready": "Plan ready",
+      "execute": "Execute plan",
+      "executing": "Executing…",
+      "adjust": "Continue adjusting"
     }
   }
 }
