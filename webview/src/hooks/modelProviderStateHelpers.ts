@@ -7,6 +7,7 @@ import {
 } from '../components/ChatInputBox/types';
 import type { ModelInfo, PermissionMode } from '../components/ChatInputBox/types';
 import type { ProviderConfig } from '../types/provider';
+import { readCustomClaudeModelIds } from '../utils/customClaudeModels';
 import { normalizeCliPermissionMode, ompModeForModelId } from './providers/cliProviders';
 
 /**
@@ -43,6 +44,141 @@ export interface ProviderPermissionModes {
   dsh: PermissionMode;
 }
 
+/** Native Codex settings persisted independently from the legacy mode field. */
+export type CodexCollaborationMode = 'default' | 'plan';
+export type CodexApprovalPreset = 'request' | 'auto' | 'sandboxed-auto' | 'full-access';
+export type CodexSandboxSelection = 'read-only' | 'workspace-write' | 'danger-full-access';
+export type CodexSandboxSource = 'native' | 'migrated' | 'user' | 'default';
+
+export interface CodexSettingsSnapshot {
+  collaborationMode: CodexCollaborationMode;
+  approvalPreset: CodexApprovalPreset;
+  sandboxSelection: CodexSandboxSelection;
+  sandboxSource: CodexSandboxSource;
+  migrationVersion: number;
+}
+
+const CODEX_APPROVAL_PRESETS: readonly CodexApprovalPreset[] = [
+  'request', 'auto', 'sandboxed-auto', 'full-access',
+];
+const CODEX_SANDBOX_SELECTIONS: readonly CodexSandboxSelection[] = [
+  'read-only', 'workspace-write', 'danger-full-access',
+];
+
+/**
+ * Migrate one persisted Codex snapshot without inventing a scope the user never
+ * asked for.
+ *
+ * A persisted sandbox selection is the strongest evidence we have, so it is
+ * honoured as-is. Only a snapshot with NO sandbox field at all falls back to the
+ * mode: `bypassPermissions` there means the user picked Full Auto, and the
+ * runtime maps Full Auto to danger-full-access + `never` on every platform
+ * (buildTurnSettings in persistent-codex-service.js). Deriving anything safer
+ * would silently break Full Auto on upgrade — the reported symptom: the
+ * selector still reads Full Auto while writes outside the project are denied.
+ */
+export function migrateCodexSettingsSnapshot(raw: Record<string, unknown> | null | undefined): CodexSettingsSnapshot {
+  const value = raw ?? {};
+  const legacyMode = value.codexPermissionMode;
+  const collaborationMode: CodexCollaborationMode = value.codexCollaborationMode === 'plan'
+    || legacyMode === 'plan' ? 'plan' : 'default';
+
+  const storedSandboxSelection = CODEX_SANDBOX_SELECTIONS.includes(
+    value.codexSandboxSelection as CodexSandboxSelection,
+  )
+    ? value.codexSandboxSelection as CodexSandboxSelection
+    : null;
+  // Only a persisted sandbox selection is evidence of an explicit choice: no
+  // released build ever wrote the old `codexFullAccessExplicit` marker.
+  const approvalPreset = CODEX_APPROVAL_PRESETS.includes(value.codexApprovalPreset as CodexApprovalPreset)
+    ? value.codexApprovalPreset as CodexApprovalPreset
+    : legacyMode === 'auto'
+      ? 'auto'
+      : legacyMode === 'bypassPermissions' || legacyMode === 'yolo'
+        ? (storedSandboxSelection === null || storedSandboxSelection === 'danger-full-access'
+          ? 'full-access'
+          : 'sandboxed-auto')
+        : 'request';
+
+  const sandboxSelection = storedSandboxSelection !== null
+    ? storedSandboxSelection
+    : legacyMode === 'readOnly'
+      ? 'read-only'
+      : approvalPreset === 'full-access'
+        ? 'danger-full-access'
+        : 'workspace-write';
+
+  const source: CodexSandboxSource = value.codexSandboxSource === 'native'
+    || value.codexSandboxSource === 'migrated'
+    || value.codexSandboxSource === 'user'
+    || value.codexSandboxSource === 'default'
+    ? value.codexSandboxSource
+    : storedSandboxSelection !== null ? 'migrated' : 'default';
+
+  return {
+    collaborationMode,
+    approvalPreset,
+    sandboxSelection,
+    sandboxSource: source,
+    migrationVersion: typeof value.codexSettingsMigrationVersion === 'number'
+      && Number.isFinite(value.codexSettingsMigrationVersion)
+      ? Math.max(1, Math.floor(value.codexSettingsMigrationVersion)) : 1,
+  };
+}
+
+/**
+ * Access scope implied by a permission mode, or null when the mode owns none.
+ *
+ * Only two modes carry a scope of their own:
+ *  - Full Auto (`bypassPermissions`/`yolo`) → unrestricted sandbox, no approvals;
+ *  - Auto review (`auto`) → guarded workspace-write, because the native reviewer
+ *    rejects a full-access sandbox (see the send-time guard in useMessageSender).
+ * Default/acceptEdits leave the sandbox where the user put it, and plan keeps the
+ * sandbox and the approval policy independent on purpose.
+ */
+export function deriveCodexAccessScopeFromMode(
+  mode: unknown,
+): { approvalPreset: CodexApprovalPreset; sandboxSelection: CodexSandboxSelection } | null {
+  if (mode === 'bypassPermissions' || mode === 'yolo') {
+    return { approvalPreset: 'full-access', sandboxSelection: 'danger-full-access' };
+  }
+  if (mode === 'auto') {
+    return { approvalPreset: 'auto', sandboxSelection: 'workspace-write' };
+  }
+  return null;
+}
+
+/** Wire-format `sandboxPolicy.type` values mapped back to the compact modes. */
+const SANDBOX_POLICY_MODES: Record<string, CodexSandboxSelection> = {
+  readOnly: 'read-only',
+  'read-only': 'read-only',
+  workspaceWrite: 'workspace-write',
+  'workspace-write': 'workspace-write',
+  dangerFullAccess: 'danger-full-access',
+  'danger-full-access': 'danger-full-access',
+};
+
+/**
+ * Effective sandbox from a `thread/settings/updated` payload, or null when the
+ * runtime has not confirmed anything yet. Null must be rendered as unknown —
+ * never replaced by the requested value.
+ */
+export function effectiveCodexSandboxFromSettings(
+  settings: Record<string, unknown> | null | undefined,
+): CodexSandboxSelection | null {
+  if (!settings || typeof settings !== 'object') {
+    return null;
+  }
+  const policy = settings.sandboxPolicy as unknown;
+  const rawType = typeof policy === 'string'
+    ? policy
+    : (policy as { type?: unknown } | null | undefined)?.type;
+  if (typeof rawType !== 'string') {
+    return null;
+  }
+  return SANDBOX_POLICY_MODES[rawType] ?? null;
+}
+
 /** Model shown for the active provider; unknown ids fall back to Claude. */
 export function selectedModelForProvider(providerId: string, models: ProviderModelSelection): string {
   switch (providerId) {
@@ -61,22 +197,20 @@ export function selectedModelForProvider(providerId: string, models: ProviderMod
 
 /**
  * Mode to activate when switching to `providerId`: the provider's saved mode,
- * normalized through the CLI rules. Codex additionally demotes a saved 'auto'
- * mode when the installed SDK is known to be too old for the native reviewer.
+ * normalized through the CLI rules. Codex 'auto' is a native-runtime decision
+ * and no longer depends on a TypeScript SDK version floor.
  */
 export function resolveProviderPermissionMode(
   providerId: string,
   modes: ProviderPermissionModes,
-  codexSdkMeetsMinimum: boolean | undefined,
 ): PermissionMode {
   switch (providerId) {
     case 'codex': {
       // Check for 'auto' BEFORE normalizeCliPermissionMode, which coerces
-      // 'auto' → 'default' for every CLI provider — after normalization the
-      // SDK-floor check below would be dead code and a saved 'auto' would be
-      // silently demoted on every provider switch.
+      // 'auto' → 'default' for every CLI provider — a saved 'auto' would be
+      // silently demoted on every provider switch otherwise.
       if (modes.codex === 'auto') {
-        return codexSdkMeetsMinimum === false ? 'default' : 'auto';
+        return 'auto';
       }
       return normalizeCliPermissionMode(modes.codex, providerId);
     }
@@ -198,7 +332,8 @@ export function applyModelSelect(
 ): void {
   if (providerId === 'claude') {
     const strippedModelId = strip1MContextSuffix(modelId);
-    const normalizedModelId = normalizeClaudeModelId(strippedModelId);
+    // Explicit user pick: a custom model id is forwarded verbatim, never migrated.
+    const normalizedModelId = normalizeClaudeModelId(strippedModelId, readCustomClaudeModelIds());
     actions.setSelectedClaudeModel(normalizedModelId);
     sendBridgeEvent('set_model', apply1MContextSuffix(normalizedModelId, longContextEnabled));
     return;
@@ -233,19 +368,6 @@ export function applyModelSelect(
     setSelectedModel(modelId);
     sendBridgeEvent('set_model', modelId);
   }
-}
-
-/**
- * Applies a mode selection for Codex: 'plan' is unsupported and a saved 'auto'
- * mode is demoted when the SDK floor is known to be unmet.
- */
-export function resolveCodexModeSelection(
-  mode: PermissionMode,
-  codexSdkMeetsMinimum: boolean | undefined,
-): PermissionMode {
-  return mode === 'plan' || (mode === 'auto' && codexSdkMeetsMinimum === false)
-    ? 'default'
-    : mode;
 }
 
 /** State-updater for toggling always-thinking on the active provider config. */

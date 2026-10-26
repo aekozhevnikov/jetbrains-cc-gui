@@ -4,10 +4,16 @@ import { useFloatingTextTooltip } from './useFloatingTextTooltip';
 import { LRUCache } from '../utils/lruCache';
 
 /**
- * Hook for managing file link tooltips in Markdown content.
- * Handles mouseover/mousemove/mouseout events on file links and displays
- * resolved project-relative paths in a floating tooltip.
+ * Hook for managing link tooltips in Markdown content.
+ * File links (data-linkify="file") show the resolved project-relative path;
+ * URL links (data-linkify="url", i.e. markdown link text that hides its
+ * target) show the raw href synchronously — no async resolution needed.
  */
+// Kept as one predicate because mouseover/mousemove/mouseout must agree on
+// which anchors own the tooltip, or it would open without following/closing.
+function isTooltipLinkType(linkType: string | null | undefined): boolean {
+  return linkType === 'file' || linkType === 'url';
+}
 export function useMarkdownFileLinkTooltip() {
   const currentHoverHrefRef = useRef<string | null>(null);
   const currentHoverAnchorRef = useRef<HTMLAnchorElement | null>(null);
@@ -46,7 +52,7 @@ export function useMarkdownFileLinkTooltip() {
     }
 
     const linkType = anchor.getAttribute('data-linkify');
-    if (linkType !== 'file') {
+    if (!isTooltipLinkType(linkType)) {
       floatingTooltip.hideTooltip();
       currentTooltipTextRef.current = null;
       currentHoverHrefRef.current = null;
@@ -100,6 +106,13 @@ export function useMarkdownFileLinkTooltip() {
       floatingTooltip.showTooltip(text, clientX, clientY);
     };
 
+    // URL links resolve synchronously — the raw href IS the tooltip text,
+    // unlike file links which need a backend round-trip.
+    if (linkType === 'url') {
+      showTooltip(href);
+      return;
+    }
+
     const cachedText = resolvedTooltipTextCache.get(href);
     if (cachedText) {
       showTooltip(cachedText);
@@ -126,7 +139,7 @@ export function useMarkdownFileLinkTooltip() {
 
   const handleMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     // Only update position when a tooltip is visible and the mouse is
-    // inside a file link.
+    // inside a file or URL link.
     latestMousePositionRef.current = {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -141,7 +154,8 @@ export function useMarkdownFileLinkTooltip() {
       ? (targetNode as Text).parentElement
       : target;
     const anchor = element?.closest('a') as HTMLAnchorElement | null;
-    if (!anchor || anchor.getAttribute('data-linkify') !== 'file') {
+    const linkType = anchor?.getAttribute('data-linkify');
+    if (!anchor || !isTooltipLinkType(linkType)) {
       return;
     }
 
@@ -161,8 +175,9 @@ export function useMarkdownFileLinkTooltip() {
       ? (targetNode as Text).parentElement
       : target;
     const anchor = element?.closest('a') as HTMLAnchorElement | null;
+    const linkType = anchor?.getAttribute('data-linkify');
 
-    if (anchor && anchor.getAttribute('data-linkify') === 'file') {
+    if (anchor && isTooltipLinkType(linkType)) {
       const relatedNode = relatedTarget as unknown as Node | null;
       const relatedElement = relatedNode?.nodeType === Node.TEXT_NODE
         ? (relatedNode as Text).parentElement

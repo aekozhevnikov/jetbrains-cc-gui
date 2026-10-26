@@ -22,6 +22,9 @@ const DROPDOWN_STYLE: React.CSSProperties = {
   marginTop: '8px',
   zIndex: 10000,
 };
+// The centered entry animation repeats the inline `translateX(-50%)` above; the
+// default `.selector-dropdown` keyframes would drop it and jump the menu.
+const DROPDOWN_CLASS = 'selector-dropdown provider-dropdown selector-dropdown--centered';
 
 function getProviderOptionStyle(enabled: boolean): React.CSSProperties {
   return {
@@ -51,15 +54,16 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
   const hiddenProviders = useHiddenCliProviders();
   const visibleProviders = AVAILABLE_PROVIDERS.filter((p) => !hiddenProviders.has(p.id));
 
-  useEffect(() => {
-    if (provider !== displayProvider) {
-      if (animationState === 'idle') {
-        setAnimationState('closing');
-      } else if (animationState === 'opening') {
-         setAnimationState('closing');
-      }
+  // Render-time adjustment on provider change: start the close animation
+  // (unless one is already running). Same transitions the old prop-change
+  // effect produced, without an extra commit.
+  const [prevProvider, setPrevProvider] = useState(provider);
+  if (prevProvider !== provider) {
+    setPrevProvider(provider);
+    if (animationState === 'idle' || animationState === 'opening') {
+      setAnimationState('closing');
     }
-  }, [provider, displayProvider, animationState]);
+  }
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
@@ -148,6 +152,14 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
         className={`${styles.container} ${styles[animationState]}`}
         onClick={handleToggle}
         style={logoStyle}
+        role={onProviderChange ? 'button' : undefined}
+        tabIndex={onProviderChange ? 0 : undefined}
+        onKeyDown={(e) => {
+          if (onProviderChange && (e.key === 'Enter' || e.key === ' ')) {
+            e.preventDefault();
+            handleToggle(e as unknown as React.MouseEvent);
+          }
+        }}
       >
         <ProviderModelIcon
           providerId={displayProvider}
@@ -159,7 +171,7 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
       {isOpen && (
         <div
           ref={dropdownRef}
-          className="selector-dropdown provider-dropdown"
+          className={DROPDOWN_CLASS}
           style={DROPDOWN_STYLE}
         >
           {visibleProviders.map((p) => (
@@ -169,6 +181,15 @@ export const BlinkingLogo = ({ provider, onProviderChange }: BlinkingLogoProps) 
               onClick={(e) => {
                 e.stopPropagation();
                 handleSelect(p.id);
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  handleSelect(p.id);
+                }
               }}
               style={getProviderOptionStyle(!!p.enabled)}
             >

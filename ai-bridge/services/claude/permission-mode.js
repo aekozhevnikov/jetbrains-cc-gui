@@ -133,10 +133,28 @@ export function createPreToolUseHook(permissionModeState, cwd = null, onModeChan
   };
 
   return async (input) => {
-    let currentPermissionMode = readPermissionMode();
+    const isSubagent = typeof input?.agent_id === 'string' && input.agent_id.length > 0;
+    // Workers can retain a different mode while the parent changes modes. Using
+    // the parent's state here would force 'ask' ahead of a worker's auto reviewer.
+    let currentPermissionMode = isSubagent && VALID_PERMISSION_MODES.has(input?.permission_mode)
+      ? input.permission_mode
+      : readPermissionMode();
     const toolName = input?.tool_name;
 
-    debugLog('PERMISSION_HOOK', `Called for tool: ${toolName}, mode: ${currentPermissionMode}`);
+    debugLog('PERMISSION_HOOK', `Called for tool: ${toolName}, mode: ${currentPermissionMode}, subagent: ${isSubagent}`);
+
+    // Native planning tools own worker-local transitions (and reject unsupported
+    // ones). A worker must never call setPermissionMode on the parent Query.
+    if (isSubagent && (toolName === 'EnterPlanMode' || toolName === 'ExitPlanMode')) {
+      return YIELD_TO_SDK;
+    }
+
+    // Worker plans belong to the SDK, including their plan-file paths and deny
+    // rules. Parent plan approvals must not preempt native worker restrictions.
+    if (isSubagent && (currentPermissionMode === 'plan' ||
+        input.permission_mode === 'dontAsk' || input.permission_mode === 'bubble')) {
+      return YIELD_TO_SDK;
+    }
 
     // ======== HANDLE EnterPlanMode - update permissionModeState ========
     // When EnterPlanMode is called, we need to switch to plan mode for subsequent tools

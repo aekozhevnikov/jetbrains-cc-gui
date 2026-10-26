@@ -7,13 +7,17 @@ import com.google.gson.JsonStreamParser;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
+import java.util.function.BooleanSupplier;
+import java.util.concurrent.CancellationException;
 import java.util.stream.Stream;
 
 /**
@@ -31,11 +35,29 @@ class CodexHistorySessionService {
         this.gson = gson;
     }
 
+    /**
+     * Returns the session transcript as JSON, or null when the rollout file is
+     * missing. A missing file is an expected stale-session state (rollouts can
+     * be pruned by the CLI or removed externally), so callers turn null into a
+     * history-missing signal instead of an empty-but-successful transcript.
+     */
     String getSessionMessagesAsJson(String sessionId) {
+        List<CodexHistoryReader.CodexMessage> messages = new ArrayList<>();
+        Path sessionFile;
         try {
-            List<CodexHistoryReader.CodexMessage> messages = new ArrayList<>();
-            forEachSessionMessage(sessionId, messages::add);
+            sessionFile = findSessionFile(sessionId);
+        } catch (IOException e) {
+            LOG.error("[CodexHistoryReader] Failed to locate session file: " + e.getMessage(), e);
+            return gson.toJson(messages);
+        }
+        if (sessionFile == null) {
+            LOG.info("[CodexHistoryReader] Codex session file is missing (pruned by the CLI or never persisted): "
+                    + sessionId);
+            return null;
+        }
 
+        try {
+            readSessionFile(sessionFile, messages::add);
             return gson.toJson(messages);
         } catch (Exception e) {
             LOG.error("[CodexHistoryReader] Failed to read session messages: " + e.getMessage(), e);
@@ -49,7 +71,11 @@ class CodexHistorySessionService {
         if (sessionFile == null) {
             throw new IOException("Codex session file not found: " + sessionId);
         }
+        return readSessionFile(sessionFile, consumer);
+    }
 
+    private int readSessionFile(Path sessionFile,
+                                Consumer<CodexHistoryReader.CodexMessage> consumer) throws IOException {
         int messageCount = 0;
         try (BufferedReader reader = Files.newBufferedReader(sessionFile, StandardCharsets.UTF_8)) {
             String line;
@@ -77,7 +103,78 @@ class CodexHistorySessionService {
         return messageCount;
     }
 
-    private Path findSessionFile(String sessionId) throws IOException {
+    int forEachSessionMessage(Path file, long offset, long end,
+                              BooleanSupplier active,
+                              Consumer<CodexHistoryReader.CodexMessage> consumer) throws IOException {
+        return this.forEachSessionMessage(file, offset, end, active, null, consumer);
+    }
+
+    int forEachSessionMessage(Path file, long offset, long end,
+                              BooleanSupplier active, Consumer<ByteBuffer> sourceBytesObserver,
+                              Consumer<CodexHistoryReader.CodexMessage> consumer) throws IOException {
+        int count = 0;
+        try (var input = Files.newInputStream(file)) {
+            input.skipNBytes(offset);
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            long remaining = end - offset;
+            while (remaining > 0) {
+                if (!active.getAsBoolean()) {
+                    throw new CancellationException("Stale Codex history request");
+                }
+                int length = input.read(buffer, 0, (int) Math.min(buffer.length, remaining));
+                if (length < 0) {
+                    throw new IOException("Codex history changed while reading");
+                }
+                if (sourceBytesObserver != null) {
+                    sourceBytesObserver.accept(ByteBuffer.wrap(buffer, 0, length).asReadOnlyBuffer());
+                }
+                remaining -= length;
+                int segmentStart = 0;
+                for (int position = 0; position < length; position++) {
+                    if (buffer[position] == '\n') {
+                        line.write(buffer, segmentStart, position - segmentStart);
+                        count += parseLine(line.toString(StandardCharsets.UTF_8), active, consumer);
+                        line.reset();
+                        segmentStart = position + 1;
+                    }
+                }
+                line.write(buffer, segmentStart, length - segmentStart);
+            }
+            if (line.size() > 0) {
+                count += parseLine(line.toString(StandardCharsets.UTF_8), active, consumer);
+            }
+        }
+        return count;
+    }
+
+    private int parseLine(String line, BooleanSupplier active,
+                          Consumer<CodexHistoryReader.CodexMessage> consumer) {
+        int count = 0;
+        JsonStreamParser parser = new JsonStreamParser(line);
+        while (true) {
+            if (!active.getAsBoolean()) {
+                throw new CancellationException("Stale Codex history request");
+            }
+            CodexHistoryReader.CodexMessage message;
+            try {
+                if (!parser.hasNext()) {
+                    return count;
+                }
+                message = gson.fromJson(parser.next(), CodexHistoryReader.CodexMessage.class);
+                message = transformFunctionCall(message);
+            } catch (RuntimeException exception) {
+                LOG.debug("[CodexHistoryReader] Failed to parse message: " + exception.getMessage());
+                return count;
+            }
+            if (message != null) {
+                consumer.accept(message);
+                count++;
+            }
+        }
+    }
+
+    Path findSessionFile(String sessionId) throws IOException {
         if (!Files.exists(sessionsDir)) {
             return null;
         }

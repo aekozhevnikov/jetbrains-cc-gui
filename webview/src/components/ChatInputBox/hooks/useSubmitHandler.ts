@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import type { Attachment } from '../types.js';
 import type { Dispatch, SetStateAction } from 'react';
+import { parseCodexCommand } from '../../../hooks/codexCommandDispatcher';
 
 interface CompletionLike {
   close: () => void;
@@ -9,19 +10,20 @@ interface CompletionLike {
 export interface UseSubmitHandlerOptions {
   getTextContent: () => string;
   attachments: Attachment[];
-  isLoading: boolean;
   sdkStatusLoading: boolean;
   sdkInstalled: boolean;
   currentProvider: string;
   clearInput: () => void;
-  /** Cancel any pending debounced input callbacks to prevent stale values from refilling the input */
-  cancelPendingInput: () => void;
   /** Invalidate text content cache to force fresh DOM read on submit */
   invalidateCache: () => void;
   externalAttachments: Attachment[] | undefined;
   setInternalAttachments: Dispatch<SetStateAction<Attachment[]>>;
-  /** Clear attachments draft from localStorage */
+  /** Clear the webview's attachment draft from sessionStorage. */
   clearAttachmentsDraft?: () => void;
+  /** Pending image reads/comparisons must finish before the draft can be submitted. */
+  hasPendingImagePastes?: () => boolean;
+  /** Successful submission closes the previous draft's clipboard replay window. */
+  invalidateImagePastes?: () => void;
   fileCompletion: CompletionLike;
   commandCompletion: CompletionLike;
   agentCompletion: CompletionLike;
@@ -45,16 +47,16 @@ export interface UseSubmitHandlerOptions {
 export function useSubmitHandler({
   getTextContent,
   attachments,
-  isLoading,
   sdkStatusLoading,
   sdkInstalled,
   currentProvider,
   clearInput,
-  cancelPendingInput,
   invalidateCache,
   externalAttachments,
   setInternalAttachments,
   clearAttachmentsDraft,
+  hasPendingImagePastes,
+  invalidateImagePastes,
   fileCompletion,
   commandCompletion,
   agentCompletion,
@@ -72,12 +74,19 @@ export function useSubmitHandler({
     const content = getTextContent();
     const cleanContent = content.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
 
-    if (sdkStatusLoading) {
+    const command = currentProvider === 'codex' ? parseCodexCommand(cleanContent) : null;
+    // Native controls have their own backend capability/access gate. Waiting
+    // for SDK discovery here can swallow /compact during a provider switch.
+    const isCodexControl = ['compact', 'review', 'diff', 'approvals'].includes(command?.kind ?? '');
+
+    // CLI providers are already known-installed. The global npm SDK query can
+    // still be in flight; waiting on it only toasts "Checking SDK status...".
+    if (!isCodexControl && sdkStatusLoading && !sdkInstalled) {
       addToast?.(t('chat.sdkStatusLoading'), 'info');
       return;
     }
 
-    if (!sdkInstalled) {
+    if (!isCodexControl && !sdkInstalled) {
       addToast?.(
         t('chat.sdkNotInstalled', {
           provider: currentProvider === 'codex' ? 'Codex' : 'Claude Code',
@@ -87,6 +96,12 @@ export function useSubmitHandler({
         'warning'
       );
       onInstallSdk?.();
+      return;
+    }
+
+    // Preserve the whole draft instead of sending a partial attachment list and refilling it later.
+    if (hasPendingImagePastes?.()) {
+      addToast?.(t('chat.pasteImagePreparing'), 'info');
       return;
     }
 
@@ -104,13 +119,13 @@ export function useSubmitHandler({
 
     const attachmentsToSend = attachments.length > 0 ? [...attachments] : undefined;
 
-    // Cancel any pending debounced input callbacks before clearing
-    // This prevents stale values from refilling the input after submit
-    cancelPendingInput();
+    // clearInput also drops any queued draft notification, so a stale debounced
+    // value cannot refill the input after submit.
+    invalidateImagePastes?.();
     clearInput();
     if (externalAttachments === undefined) {
       setInternalAttachments([]);
-      // Clear attachments draft from localStorage
+      // Clear persisted images immediately so a remount cannot restore a submitted draft.
       clearAttachmentsDraft?.();
     }
 
@@ -122,15 +137,15 @@ export function useSubmitHandler({
     getTextContent,
     invalidateCache,
     attachments,
-    isLoading,
     sdkStatusLoading,
     sdkInstalled,
     currentProvider,
     clearInput,
-    cancelPendingInput,
     externalAttachments,
     setInternalAttachments,
     clearAttachmentsDraft,
+    hasPendingImagePastes,
+    invalidateImagePastes,
     fileCompletion,
     commandCompletion,
     agentCompletion,

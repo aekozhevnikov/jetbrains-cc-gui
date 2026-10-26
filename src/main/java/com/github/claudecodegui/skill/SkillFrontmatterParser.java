@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
@@ -28,6 +30,26 @@ public final class SkillFrontmatterParser {
     private static final int NAME_MAX_LENGTH = 64;
     private static final int DESCRIPTION_MAX_LENGTH = 1024;
     private static final Pattern CONSECUTIVE_HYPHENS = Pattern.compile("--");
+
+    /**
+     * Skill files already reported for an invalid frontmatter {@code name}.
+     *
+     * <p>Skill discovery runs on every settings/skill refresh, so an undeduped
+     * warning re-reported the same file on each pass (44 lines in a single
+     * second, observed). Keyed by SKILL.md path, which is stable and few.
+     */
+    private static final Set<String> REPORTED_INVALID_NAMES = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Whether an invalid-name warning for this skill file still needs to be emitted.
+     * Exposed for tests.
+     *
+     * @param skillMd the SKILL.md path being parsed
+     * @return true the first time this path is reported, false on every later pass
+     */
+    static boolean shouldReportInvalidName(Path skillMd) {
+        return REPORTED_INVALID_NAMES.add(skillMd.toString());
+    }
 
     private SkillFrontmatterParser() {
     }
@@ -159,8 +181,12 @@ public final class SkillFrontmatterParser {
         if (nameObj != null) {
             name = String.valueOf(nameObj).trim();
             if (!isValidSkillName(name)) {
-                LOG.warn("Invalid skill name '" + name + "' in " + skillMd
-                        + ", falling back to directory name '" + dirName + "'");
+                // Warn once per file - the fallback is deterministic and re-reporting it on
+                // every scan only buries real warnings.
+                if (shouldReportInvalidName(skillMd)) {
+                    LOG.warn("Invalid skill name '" + name + "' in " + skillMd
+                            + ", falling back to directory name '" + dirName + "'");
+                }
                 name = dirName;
             }
         } else {

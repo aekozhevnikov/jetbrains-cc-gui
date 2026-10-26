@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
+  sameLedgerOps,
   applySearchReplace,
   reconstructBaselineAndCurrent,
   buildSessionFileLedger,
@@ -80,6 +81,23 @@ describe('reconstructBaselineAndCurrent', () => {
     ];
     const r = reconstructBaselineAndCurrent(ops);
     expect(r.fullyApplied).toBe(false);
+  });
+});
+
+describe('sameLedgerOps', () => {
+  it('compares operation content, identity, ownership, order and line metadata', () => {
+    const original = [op({ filePath: '/a.ts', oldString: 'a', newString: 'b', toolUseId: 'edit-1' })];
+    expect(sameLedgerOps(original, original.map((entry) => ({ ...entry })))).toBe(true);
+    for (const change of [
+      { toolUseId: 'edit-2' }, { sourceId: 'sub-source' }, { agentId: 'sub' }, { newString: 'changed' },
+      { oldString: 'other' }, { lineStart: 5 }, { lineEnd: 8 },
+      { replaceAll: true }, { filePath: '/b.ts' }, { toolName: 'Write' },
+    ]) {
+      expect(sameLedgerOps(original, [{ ...original[0], ...change }])).toBe(false);
+    }
+    expect(sameLedgerOps(original, [])).toBe(false);
+    const second = op({ filePath: '/b.ts', oldString: 'a', newString: 'b' });
+    expect(sameLedgerOps([...original, second], [second, ...original])).toBe(false);
   });
 });
 

@@ -69,6 +69,7 @@ test.beforeEach(async () => {
 test('buildRequestContext preserves resolved model mapping for context usage runtimes', async () => {
   const previousAnthropicModel = process.env.ANTHROPIC_MODEL;
   const previousSonnetModel = process.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+  const previousOpusModel = process.env.ANTHROPIC_DEFAULT_OPUS_MODEL;
 
   try {
     const requestContext = await __testing.buildRequestContext(
@@ -81,6 +82,11 @@ test('buildRequestContext preserves resolved model mapping for context usage run
         settings: {
           env: {
             ANTHROPIC_DEFAULT_SONNET_MODEL: 'custom-sonnet-model',
+            // A tier other than the current one: before the fix it existed only in
+            // settings.json and never reached process.env, so a subagent declaring
+            // `model: opus` could not find it, fell back to the CLI's built-in model
+            // name, and was silently absorbed by the third-party endpoint.
+            ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3-flash',
           },
         },
       },
@@ -93,22 +99,30 @@ test('buildRequestContext preserves resolved model mapping for context usage run
         ANTHROPIC_DEFAULT_SONNET_MODEL: 'custom-sonnet-model',
       }),
       {
-        sdkModelName: 'sonnet',
+        // The exact resolved id is handed to the SDK. The 'sonnet' alias would
+        // resolve through ANTHROPIC_DEFAULT_SONNET_MODEL, which the settings
+        // override blanks - so the alias silently falls back to the CLI default.
+        sdkModelName: 'custom-sonnet-model',
         resolvedModelId: 'custom-sonnet-model',
       },
-      'resolved model state should honor mapped sonnet model settings',
+      'resolved model state should hand the exact mapped model to the SDK',
     );
     assert.equal(requestContext.resolvedModelId, 'custom-sonnet-model');
     assert.equal(requestContext.options.env.ANTHROPIC_MODEL, 'custom-sonnet-model');
     assert.equal(requestContext.options.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'custom-sonnet-model');
+    // The inline settings echo the user's configured tiers verbatim, all of them taken from
+    // settings.json - the current tier included, since modelId does not feed this layer. This is
+    // only a faithful read-back of the user's config: measurements show the CLI does not adopt
+    // it (see buildWebviewControlledSettingsOverride in api-config.js). The path that actually
+    // takes effect for subagent tiers is the one asserted against process.env below.
     assert.deepEqual(requestContext.options.settings, {
       env: {
         CLAUDE_CODE_EFFORT_LEVEL: '',
         MAX_THINKING_TOKENS: '',
         ANTHROPIC_MODEL: '',
         ANTHROPIC_DEFAULT_FABLE_MODEL: '',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: '',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: '',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3-flash',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'custom-sonnet-model',
         ANTHROPIC_DEFAULT_HAIKU_MODEL: '',
         ANTHROPIC_SMALL_FAST_MODEL: '',
         CLAUDE_CODE_SUBAGENT_MODEL: '',
@@ -117,6 +131,8 @@ test('buildRequestContext preserves resolved model mapping for context usage run
     });
     assert.equal(process.env.ANTHROPIC_MODEL, 'custom-sonnet-model');
     assert.equal(process.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'custom-sonnet-model');
+    assert.equal(process.env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3-flash',
+      'settings.json tiers other than the current one must also reach process.env');
     assert.equal(exactContext.options.model, 'custom-sonnet-model');
     assert.equal(exactContext.sdkModelName, 'custom-sonnet-model');
     assert.equal(exactContext.modelId, 'claude-sonnet-4-6');
@@ -131,6 +147,12 @@ test('buildRequestContext preserves resolved model mapping for context usage run
       delete process.env.ANTHROPIC_DEFAULT_SONNET_MODEL;
     } else {
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL = previousSonnetModel;
+    }
+
+    if (previousOpusModel === undefined) {
+      delete process.env.ANTHROPIC_DEFAULT_OPUS_MODEL;
+    } else {
+      process.env.ANTHROPIC_DEFAULT_OPUS_MODEL = previousOpusModel;
     }
   }
 });
@@ -174,7 +196,7 @@ test('getContextUsagePersistent reuses runtime and calls setModel when model cha
   const factory = createContextAwareQueryFactory({ totalTokens: 5000 });
   __testing.setQueryFn(factory.queryFn);
 
-  // Pre-acquire a runtime for session 'sess-2' with model 'opus'
+  // Pre-acquire a runtime for session 'sess-2' with an exact Opus id
   const requestContext = await __testing.buildRequestContext({
     sessionId: 'sess-2',
     model: 'claude-opus-4-7',
@@ -183,7 +205,10 @@ test('getContextUsagePersistent reuses runtime and calls setModel when model cha
   await __testing.acquireRuntime(requestContext);
 
   assert.equal(factory.runtimes.length, 1, 'should have 1 runtime initially');
-  assert.equal(factory.runtimes[0].currentModel, 'opus', 'runtime should have opus model');
+  // The SDK receives the exact id, not the 'opus' family alias (the alias would
+  // resolve to the CLI default because the settings override blanks
+  // ANTHROPIC_DEFAULT_OPUS_MODEL).
+  assert.equal(factory.runtimes[0].currentModel, 'claude-opus-4-7', 'runtime should carry the exact model id');
 
   // Request context usage with a DIFFERENT model (sonnet instead of opus)
   // The runtime should be reused and setModel called to update the model

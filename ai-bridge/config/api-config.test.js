@@ -8,10 +8,31 @@ import { pathToFileURL } from 'node:url';
 import {
   buildCliEnv,
   buildWebviewControlledSettingsOverride,
+  isDangerousEnvVar,
   isWebviewControlledEnvVar,
 } from './api-config.js';
 
 const API_CONFIG_MODULE = pathToFileURL(path.resolve('ai-bridge/config/api-config.js')).href;
+
+test('Codex native access requires an active managed provider or explicitly authorized CLI Login', () => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-runtime-access-'));
+  try {
+    fs.mkdirSync(path.join(homeDir, '.codemoss'));
+    for (const [codex, access] of [
+      [{ current: '' }, 'inactive'],
+      [{ current: '__codex_cli_login__' }, 'inactive'],
+      [{ current: '__codex_cli_login__', localConfigAuthorized: true }, 'cli_login'],
+      [{ current: 'provider', providers: { provider: { configToml: 'model="test"' } } }, 'managed'],
+      [{ current: 'provider', providers: { provider: 'invalid' } }, 'inactive'],
+    ]) {
+      fs.writeFileSync(path.join(homeDir, '.codemoss', 'config.json'), JSON.stringify({ codex }));
+      const output = execFileSync(process.execPath, ['--input-type=module', '--eval',
+        `import { getCodexRuntimeState } from ${JSON.stringify(API_CONFIG_MODULE)}; console.log(JSON.stringify(getCodexRuntimeState()));`],
+      { env: buildChildEnv(homeDir), encoding: 'utf8' });
+      assert.equal(JSON.parse(output.trim()).access, access);
+    }
+  } finally { fs.rmSync(homeDir, { recursive: true, force: true }); }
+});
 
 function buildChildEnv(homeDir) {
   const env = {
@@ -229,6 +250,19 @@ test('isWebviewControlledEnvVar classifies model, context, and reasoning control
   assert.equal(isWebviewControlledEnvVar('ANTHROPIC_API_KEY'), false);
 });
 
+test('isDangerousEnvVar blocks code injection and Codex CLI path overrides', () => {
+  assert.equal(isDangerousEnvVar('NODE_OPTIONS'), true);
+  assert.equal(isDangerousEnvVar('LD_PRELOAD'), true);
+  // A request-injected CLI path override would relaunch the app-server child
+  // as an attacker binary with managed credentials.
+  assert.equal(isDangerousEnvVar('CODEX_BIN'), true);
+  assert.equal(isDangerousEnvVar('CODEX_PATH'), true);
+  assert.equal(isDangerousEnvVar('CODEX_CLI_PATH'), true);
+  assert.equal(isDangerousEnvVar('codex_cli_path'), true); // case-insensitive
+  assert.equal(isDangerousEnvVar('ANTHROPIC_API_KEY'), false);
+  assert.equal(isDangerousEnvVar('PATH'), false); // Java EnvironmentConfigurator supplies PATH
+});
+
 test('buildCliEnv strips stale CLI override env vars and sets host-managed for first-party auth', () => {
   const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-gui-api-config-'));
   // Active managed provider so loadClaudeSettings() returns settings; no cloud
@@ -289,6 +323,55 @@ test('buildWebviewControlledSettingsOverride neutralizes Claude CLI settings env
       ...modelRoutingOverrides,
     },
   });
+});
+
+test('buildWebviewControlledSettingsOverride forwards configured tiers instead of blanking them', () => {
+  // This test only pins the shape of the function's output: configured tiers are echoed
+  // back verbatim, unconfigured ones stay blank.
+  //
+  // Note: measurements (SDK 0.3.290 / CLI 2.1.290) show the inline `--settings` env block is
+  // not adopted by the CLI, so this layer has no practical effect on tier resolution. The real
+  // guarantee for subagent tiers is setModelEnvironmentVariables() spreading every tier into
+  // process.env (see utils/model-utils.js). The pass-through is kept because it expresses the
+  // intent faithfully and stays compatible should the CLI adopt settings.env.
+  const settingsEnv = {
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3-flash',
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: 'doubao-seed-2.1-lite',
+    ANTHROPIC_DEFAULT_FABLE_MODEL: 'DeepSeek-V4.1-Flash',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'DeepSeek-V4.1-Flash',
+    ANTHROPIC_SMALL_FAST_MODEL: 'deepseek-v3.2',
+    ANTHROPIC_MODEL: 'stale-global-model',
+  };
+
+  assert.deepEqual(buildWebviewControlledSettingsOverride('claude-sonnet-4-6', settingsEnv), {
+    env: {
+      CLAUDE_CODE_EFFORT_LEVEL: '',
+      MAX_THINKING_TOKENS: '',
+      ANTHROPIC_MODEL: '',
+      ANTHROPIC_DEFAULT_FABLE_MODEL: 'DeepSeek-V4.1-Flash',
+      ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3-flash',
+      ANTHROPIC_DEFAULT_SONNET_MODEL: 'DeepSeek-V4.1-Flash',
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: 'doubao-seed-2.1-lite',
+      ANTHROPIC_SMALL_FAST_MODEL: 'deepseek-v3.2',
+      CLAUDE_CODE_SUBAGENT_MODEL: '',
+      CLAUDE_CODE_DISABLE_1M_CONTEXT: '1',
+    },
+  });
+});
+
+test('buildWebviewControlledSettingsOverride leaves unconfigured tiers blank', () => {
+  const result = buildWebviewControlledSettingsOverride('claude-opus-5', {
+    ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3-flash',
+  });
+
+  assert.equal(result.env.ANTHROPIC_DEFAULT_OPUS_MODEL, 'glm-5.3-flash');
+  assert.equal(result.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, '');
+  assert.equal(result.env.CLAUDE_CODE_SUBAGENT_MODEL, '');
+  assert.equal(
+    result.env.ANTHROPIC_MODEL,
+    '',
+    'ANTHROPIC_MODEL must stay blank: blocking the stale settings.json copy is exactly the issue #1509 fix'
+  );
 });
 
 test('buildCliEnv leaves CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST unset for cloud providers', () => {

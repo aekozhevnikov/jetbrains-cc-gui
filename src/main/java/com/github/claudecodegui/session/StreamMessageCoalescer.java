@@ -30,10 +30,7 @@ public class StreamMessageCoalescer {
     private static final long SLOW_PAYLOAD_BUILD_MS = 25L;
     private static final int LARGE_PAYLOAD_THRESHOLD = 100_000;
     private static final int MEDIUM_INTERVAL_MS = 500;
-    private static final int LARGE_INTERVAL_MS = 2_000;
     private static final int XLARGE_INTERVAL_MS = 5_000;
-    private static final int LONG_CONVERSATION_THRESHOLD = 300;
-    private static final int LONG_CONVERSATION_TAIL_SIZE = 64;
     private static final int STREAMING_MIN_INTERVAL_MS = 150;
     private static final int HEARTBEAT_INTERVAL_MS = 10_000;
 
@@ -60,6 +57,7 @@ public class StreamMessageCoalescer {
     // Gson keys use deep equality and mutable hashes. Cache by raw identity and
     // retain only the current list so old stream fragments cannot accumulate.
     private Map<JsonObject, String> structuralSignatureCache = new IdentityHashMap<>();
+    private Map<ClaudeSession.Message, ClaudeSession.Message> transportSnapshotCache = new IdentityHashMap<>();
     private boolean snapshotBuildRunning;
     private List<ClaudeSession.Message> requestedSnapshot;
     private long requestedSequence;
@@ -132,7 +130,6 @@ public class StreamMessageCoalescer {
         // in either is a genuine bug rather than a race to retry around. Neither is
         // swallowed: a silently dropped snapshot leaves the UI stale with no signal at
         // all, which is strictly harder to diagnose than a thrown exception.
-        String structuralSignature = getStructuralSignature(messages);
         // Read outside the lock: this calls into HandlerContext, and a stale
         // read only schedules (or skips) one push that the stream-end flush
         // reconciles. Keep foreign calls out of the critical section.
@@ -143,6 +140,7 @@ public class StreamMessageCoalescer {
             if (disposed) {
                 return;
             }
+            String structuralSignature = getStructuralSignature(messages);
             latestLiveMessages = List.copyOf(messages);
             boolean structuralChanged = !Objects.equals(latestStructuralSignature, structuralSignature);
             latestStructuralSignature = structuralSignature;
@@ -151,7 +149,7 @@ public class StreamMessageCoalescer {
             shouldSchedule = !active || !deltaChannelAvailable || structuralChanged;
             if (shouldSchedule) {
                 // This copy is deliberately made before the provider can mutate raw again.
-                latestSourceMessages = copyMessagesForTransport(messages);
+                latestSourceMessages = captureReusableMessages(messages);
             }
         }
         if (active) {
@@ -238,6 +236,8 @@ public class StreamMessageCoalescer {
             if (disposed) {
                 return;
             }
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
             latestLiveMessages = messages;
             latestSourceMessages = messages;
             latestStructuralSignature = null;
@@ -282,6 +282,8 @@ public class StreamMessageCoalescer {
             lastDeliveredSnapshot = null;
             latestStructuralSignature = null;
             requestedSnapshot = null;
+            transportSnapshotCache.clear();
+            structuralSignatureCache.clear();
             requestedAfterFlush = null;
             requestedForceFull = false;
             lastUpdateAtMs = 0L;
@@ -345,6 +347,7 @@ public class StreamMessageCoalescer {
         final List<ClaudeSession.Message> sourceMessages;
         final boolean sourceIsTransportCopy;
         final List<ClaudeSession.Message> previousSnapshot;
+        final List<ClaudeSession.Message> snapshot;
         final long sequence;
         synchronized (lock) {
             updateAlarm.cancelAllRequests();
@@ -365,19 +368,17 @@ public class StreamMessageCoalescer {
             }
             previousSnapshot = lastSnapshot;
             sequence = ++updateSequence;
-        }
-
-        final List<ClaudeSession.Message> snapshot;
-        if (sourceMessages == null) {
-            snapshot = previousSnapshot;
-        } else if (sourceIsTransportCopy) {
-            snapshot = sourceMessages;
-        } else {
-            // A transport copy is already detached; only a live source is copied here,
-            // and the caller holds the message lock that makes it safe. A failure is a
-            // genuine bug, so it propagates rather than being swallowed — the caller
-            // owns the recovery, and the stream-end fallback alarm is the backstop.
-            snapshot = copyMessagesForTransport(sourceMessages);
+            if (sourceMessages == null) {
+                snapshot = previousSnapshot;
+            } else if (sourceIsTransportCopy) {
+                snapshot = sourceMessages;
+            } else {
+                snapshot = captureReusableMessages(sourceMessages);
+            }
+            if (snapshot != null) {
+                latestSourceMessages = snapshot;
+                snapshotPending = true;
+            }
         }
 
         if (snapshot == null) {
@@ -385,10 +386,6 @@ public class StreamMessageCoalescer {
             return;
         }
 
-        synchronized (lock) {
-            latestSourceMessages = snapshot;
-            snapshotPending = true;
-        }
         requestSnapshotBuild(snapshot, sequence, afterFlush, true);
     }
 
@@ -397,6 +394,7 @@ public class StreamMessageCoalescer {
      */
     public void dispose() {
         disposed = true;
+        resetStreamState();
         try {
             updateAlarm.cancelAllRequests();
             updateAlarm.dispose();
@@ -418,10 +416,13 @@ public class StreamMessageCoalescer {
         }
         int chars = lastPayloadChars;
         int interval;
-        if (chars > 500_000) {
+        // Payloads above 200k chars used to ship every 2s and were observed to
+        // stall the JCEF renderer long enough for the watchdog to reload the
+        // page. With divergence-based tail transport these huge full snapshots
+        // are rare (initial load, rebase), so coalesce them hard when they do
+        // occur — the streaming delta channel keeps text flowing meanwhile.
+        if (chars > 200_000) {
             interval = XLARGE_INTERVAL_MS;
-        } else if (chars > 200_000) {
-            interval = LARGE_INTERVAL_MS;
         } else if (chars > LARGE_PAYLOAD_THRESHOLD) {
             interval = MEDIUM_INTERVAL_MS;
         } else {
@@ -752,33 +753,54 @@ public class StreamMessageCoalescer {
         }
     }
 
+    /**
+     * Choose what to transport for one snapshot delivery.
+     *
+     * <p>Streaming changes concentrate at the tail of the transcript (new blocks,
+     * new messages, text appended to the last message), so instead of gating
+     * incremental delivery on conversation length this finds the first index
+     * where the new snapshot diverges from the delivered one and ships only the
+     * suffix from that point. A 50-message conversation with a 300k-char
+     * transcript then pushes a few KB per update instead of the full transcript,
+     * which is what kept the JCEF renderer busy enough to trip the webview
+     * watchdog. Any change ahead of the tail — an edited or compacted middle
+     * message — is detected by the same walk and simply widens the suffix; only
+     * a divergence at index 0 (or a shrunk/unknown baseline) falls back to a
+     * full snapshot.</p>
+     *
+     * <p>The prefix walk runs on the snapshot executor thread. {@code String.equals}
+     * bails on length and the identity shortcut covers shared entries, so the
+     * comparison is far cheaper than the serialization it replaces.</p>
+     */
     static MessageTransport selectMessageTransport(List<ClaudeSession.Message> messages,
                                                     List<ClaudeSession.Message> previousMessages) {
-        boolean longConversation = messages.size() > LONG_CONVERSATION_THRESHOLD;
-        int candidateBaseIndex = longConversation
-                ? Math.max(0, messages.size() - LONG_CONVERSATION_TAIL_SIZE) : 0;
-        boolean stablePrefix = previousMessages != null
-                && messages.size() >= previousMessages.size()
-                && hasSamePrefix(previousMessages, messages, candidateBaseIndex);
-        boolean tailUpdate = longConversation && stablePrefix;
-        int baseIndex = tailUpdate ? candidateBaseIndex : 0;
-        List<ClaudeSession.Message> transportMessages = tailUpdate
-                ? List.copyOf(messages.subList(baseIndex, messages.size())) : messages;
-        return new MessageTransport(transportMessages, baseIndex, tailUpdate);
+        if (previousMessages == null || messages.size() < previousMessages.size()) {
+            return new MessageTransport(messages, 0, false);
+        }
+        int divergence = firstDivergenceIndex(previousMessages, messages);
+        if (divergence <= 0 || divergence >= messages.size()) {
+            // No stable prefix to build on, or nothing changed at all.
+            return new MessageTransport(messages, 0, false);
+        }
+        List<ClaudeSession.Message> transportMessages =
+                List.copyOf(messages.subList(divergence, messages.size()));
+        return new MessageTransport(transportMessages, divergence, true);
     }
 
-    private static boolean hasSamePrefix(List<ClaudeSession.Message> previousMessages,
-                                         List<ClaudeSession.Message> messages,
-                                         int prefixLength) {
-        if (previousMessages.size() < prefixLength) {
-            return false;
-        }
+    /**
+     * Return the first index where {@code messages} differs from
+     * {@code previousMessages}, or the shared prefix length when one list is a
+     * strict prefix of the other.
+     */
+    private static int firstDivergenceIndex(List<ClaudeSession.Message> previousMessages,
+                                            List<ClaudeSession.Message> messages) {
+        int prefixLength = Math.min(previousMessages.size(), messages.size());
         for (int i = 0; i < prefixLength; i++) {
             if (!sameStableMessage(previousMessages.get(i), messages.get(i))) {
-                return false;
+                return i;
             }
         }
-        return true;
+        return prefixLength;
     }
 
     private static boolean sameStableMessage(ClaudeSession.Message previous,
@@ -787,9 +809,8 @@ public class StreamMessageCoalescer {
                 || previous.type == current.type
                 && previous.timestamp == current.timestamp
                 && Objects.equals(previous.content, current.content)
-                && Objects.equals(
-                        computeMessageStructuralSignature(previous.raw),
-                        computeMessageStructuralSignature(current.raw));
+                // Scheduling may ignore text deltas, but suffix transport must include every raw correction.
+                && Objects.equals(previous.raw, current.raw);
     }
 
     /**
@@ -820,18 +841,43 @@ public class StreamMessageCoalescer {
         return List.copyOf(copies);
     }
 
-    private synchronized String getStructuralSignature(List<ClaudeSession.Message> messages) {
+    private List<ClaudeSession.Message> captureReusableMessages(List<ClaudeSession.Message> messages) {
+        synchronized (lock) {
+            Map<ClaudeSession.Message, ClaudeSession.Message> currentCache = new IdentityHashMap<>();
+            List<ClaudeSession.Message> copies = new ArrayList<>(messages.size());
+            for (ClaudeSession.Message message : messages) {
+                ClaudeSession.Message copy = transportSnapshotCache.get(message);
+                if (copy == null || copy.type != message.type || copy.timestamp != message.timestamp
+                        || !Objects.equals(copy.content, message.content) || !Objects.equals(copy.raw, message.raw)) {
+                    copy = new ClaudeSession.Message(message.type, message.content);
+                    copy.timestamp = message.timestamp;
+                    copy.raw = message.raw == null ? null : message.raw.deepCopy();
+                }
+                currentCache.put(message, copy);
+                copies.add(copy);
+            }
+            if (!disposed) {
+                transportSnapshotCache = currentCache;
+            }
+            return List.copyOf(copies);
+        }
+    }
+
+    private String getStructuralSignature(List<ClaudeSession.Message> messages) {
         Map<JsonObject, String> currentCache = new IdentityHashMap<>();
         StringBuilder signature = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             ClaudeSession.Message message = messages.get(i);
             JsonObject raw = message.raw;
-            String blockSignature = raw == null ? "" : structuralSignatureCache.get(raw);
+            ClaudeSession.Message cachedMessage = transportSnapshotCache.get(message);
+            JsonObject cachedRaw = cachedMessage != null && Objects.equals(raw, cachedMessage.raw)
+                    ? cachedMessage.raw : null;
+            String blockSignature = raw == null ? "" : structuralSignatureCache.get(cachedRaw);
             if (blockSignature == null) {
                 blockSignature = computeMessageStructuralSignature(raw);
             }
-            if (raw != null) {
-                currentCache.put(raw, blockSignature);
+            if (cachedRaw != null) {
+                currentCache.put(cachedRaw, blockSignature);
             }
             signature.append(i)
                     .append(':')
@@ -934,7 +980,9 @@ public class StreamMessageCoalescer {
             return false;
         }
         String provider = context.getCurrentProvider();
-        return "claude".equals(provider) || "codex".equals(provider) || "grok".equals(provider)
+        // Codex item snapshots carry the entire growing text/thinking block.
+        // Skipping their text-only updates would wait for a delta that never arrives.
+        return "claude".equals(provider) || "grok".equals(provider)
                 || "zcode".equals(provider);
     }
 

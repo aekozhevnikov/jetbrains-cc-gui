@@ -107,8 +107,8 @@ public class SessionLifecycleManager {
                                                           ? oldSession.interrupt()
                                                           : CompletableFuture.completedFuture(null);
 
-        interruptFuture.thenRun(() -> {
-            releasePersistentProviderResources(oldSession, "new session");
+        interruptFuture.thenCompose(ignored -> this.releasePersistentProviderResources(oldSession, "new session"))
+                .thenRun(() -> {
             LOG.info("Old session interrupted, creating new session");
 
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -119,7 +119,10 @@ public class SessionLifecycleManager {
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(previousProvider);
-            newSession.setModel(previousModel);
+            // Verbatim copy: the live value was already sanitized when set (migrated
+            // on restore, or an explicit custom id via set_model), so re-migrating
+            // here could only rewrite a user's custom model behind their back.
+            newSession.setModelVerbatim(previousModel);
             LOG.info("Restored session state to new session: mode=" + previousPermissionMode
                              + ", provider=" + previousProvider + ", model=" + previousModel);
 
@@ -152,8 +155,8 @@ public class SessionLifecycleManager {
                 ? oldSession.interrupt()
                 : CompletableFuture.completedFuture(null);
 
-        interruptFuture.thenRun(() -> {
-            releasePersistentProviderResources(oldSession, "new session from template");
+        interruptFuture.thenCompose(ignored -> this.releasePersistentProviderResources(oldSession, "new session from template"))
+                .thenRun(() -> {
             LOG.info("Old session interrupted, creating new session from template");
 
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -171,7 +174,9 @@ public class SessionLifecycleManager {
                 newSession.setProvider(template.getProvider());
             }
             if (template.getModel() != null) {
-                newSession.setModel(template.getModel());
+                // Templates hold an explicit user choice (possibly a custom model id),
+                // so keep it verbatim like any other explicit selection.
+                newSession.setModelVerbatim(template.getModel());
             }
             if (template.getReasoningEffort() != null) {
                 newSession.setReasoningEffort(template.getReasoningEffort());
@@ -251,13 +256,16 @@ public class SessionLifecycleManager {
                 ? oldSession.interrupt()
                 : CompletableFuture.completedFuture(null);
 
-        interruptFuture.thenRun(() -> {
-            releasePersistentProviderResources(oldSession, "history load");
+        interruptFuture.thenCompose(ignored -> this.releasePersistentProviderResources(oldSession, "history load"))
+                .thenRun(() -> {
 
             ClaudeSession newSession = createDefaultSession();
             newSession.setPermissionMode(previousPermissionMode);
             newSession.setProvider(provider != null && !provider.trim().isEmpty() ? provider : previousProvider);
-            newSession.setModel(modelToRestore);
+            // Verbatim: a payload model comes from the webview, which is the authority
+            // on custom ids and already applied retired-id migration where it is safe;
+            // a fallback previousModel is a live value that was sanitized when set.
+            newSession.setModelVerbatim(modelToRestore);
             LOG.info("Restored session state to loaded session: mode=" + previousPermissionMode
                              + ", provider=" + newSession.getProvider() + ", model=" + modelToRestore);
 
@@ -462,30 +470,44 @@ public class SessionLifecycleManager {
      * Persisted transcripts and session IDs remain available, so the next real
      * message can lazily recreate the selected provider and resume normally.
      */
-    private void releasePersistentProviderResources(ClaudeSession oldSession, String reason) {
+    private CompletableFuture<Void> releasePersistentProviderResources(ClaudeSession oldSession, String reason) {
         if (oldSession == null) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
 
         String oldEpoch = oldSession.getRuntimeSessionEpoch();
-        ClaudeSDKBridge claudeBridge = host.getClaudeSDKBridge();
+        ClaudeSDKBridge claudeBridge = this.host.getClaudeSDKBridge();
         if (claudeBridge != null) {
             claudeBridge.resetPersistentRuntime(oldEpoch);
             claudeBridge.shutdownDaemon();
         }
 
-        if (host.getGrokSDKBridge() != null) {
-            host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
-            host.getGrokSDKBridge().shutdownDaemon();
+        if (this.host.getGrokSDKBridge() != null) {
+            this.host.getGrokSDKBridge().resetPersistentRuntime(oldEpoch);
+            this.host.getGrokSDKBridge().shutdownDaemon();
         }
 
-        if (host.getZcodeSDKBridge() != null) {
-            host.getZcodeSDKBridge().resetPersistentRuntime(oldEpoch);
-            host.getZcodeSDKBridge().shutdownDaemon();
+        if (this.host.getZcodeSDKBridge() != null) {
+            this.host.getZcodeSDKBridge().resetPersistentRuntime(oldEpoch);
+            this.host.getZcodeSDKBridge().shutdownDaemon();
         }
 
-        LOG.info("[Lifecycle] Released persistent provider resources for " + reason
-                + ", old epoch=" + oldEpoch);
+        CompletableFuture<Void> drained = CompletableFuture.completedFuture(null);
+        if ("codex".equals(oldSession.getProvider())) {
+            CodexSDKBridge codexBridge = this.host.getCodexSDKBridge();
+            if (codexBridge != null) {
+                // A restored session reuses the default channel; its next reader must wait for this writer's release.
+                drained = codexBridge.releaseCodexThread(oldSession.getChannelId(), oldSession.getCwd(), oldSession.getSessionId())
+                        .thenAccept(result -> {
+                            if (result.has("error")) {
+                                throw new IllegalStateException(result.get("error").getAsString());
+                            }
+                        });
+            }
+        }
+
+        return drained.thenRun(() -> LOG.info("[Lifecycle] Released persistent provider resources for " + reason
+                + ", old epoch=" + oldEpoch));
     }
 
     private void completeNewSessionBootstrap(ClaudeSession newSession, String workingDirectory, String successLogPrefix) {

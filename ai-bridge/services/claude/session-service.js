@@ -381,3 +381,192 @@ function resolveSessionFile(sessionId, cwd = null) {
   }
   return getExistingClaudeProjectSessionFilePath(sessionId, cwd);
 }
+
+/**
+ * A Claude "turn" is a contiguous block of messages starting with a user
+ * message (the prompt) followed by any assistant/tool messages until the
+ * next user message. Pagination is turn-based so a page boundary never
+ * splits an assistant reply from its tool calls or a tool result from its
+ * originating call.
+ */
+function isTurnStart(message) {
+  return Boolean(
+    message &&
+    message.type === 'user' &&
+    typeof message.uuid === 'string' &&
+    !isInterruptionMarker(message)
+  );
+}
+
+/** The trimmed value when it is a non-blank string, null otherwise. */
+function trimmedText(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/**
+ * Derive the CLI's display title for a session from its raw transcript rows,
+ * mirroring the resume-picker priority (cli.js Se() over the lite-read
+ * enrichment KhY): customTitle > aiTitle > summary > lastPrompt > firstPrompt.
+ * Title records are metadata rows interleaved with the messages
+ * ({"type":"custom-title"...}, {"type":"ai-title"...}, summary rows), so the
+ * scan runs on the raw parse, before conversation-chain filtering drops them.
+ * Later records of the same kind win, matching the CLI's last-write view.
+ * The firstPrompt fallback skips isMeta rows and XML-wrapped CLI plumbing
+ * (<command-name>/<local-command-caveat>), like the CLI's _hY scan.
+ * Returns null when the transcript carries no title material; the frontend
+ * then falls back to deriving a title from the loaded messages.
+ */
+export function extractSessionTitle(rows) {
+  let customTitle = null;
+  let aiTitle = null;
+  let summary = null;
+  let lastPrompt = null;
+  let firstPrompt = null;
+  for (const row of rows) {
+    if (!row || typeof row !== 'object') continue;
+    if (row.type === 'custom-title') {
+      customTitle = trimmedText(row.customTitle) ?? customTitle;
+    } else if (row.type === 'ai-title') {
+      aiTitle = trimmedText(row.aiTitle) ?? aiTitle;
+    } else {
+      summary = trimmedText(row.summary) ?? summary;
+    }
+    lastPrompt = trimmedText(row.lastPrompt) ?? lastPrompt;
+    if (firstPrompt === null && isUserTextMessage(row) && !row.isMeta) {
+      const text = extractTextContent(row).trim();
+      // XML-wrapped rows (<command-name>/<local-command-caveat>) are CLI
+      // plumbing, not user input; the CLI's own firstPrompt scan (_hY) skips
+      // them, and the webview renders the derived title verbatim, so letting
+      // them through would leak internal markup into the header.
+      if (!text.startsWith('<')) {
+        firstPrompt = text;
+      }
+    }
+  }
+  return customTitle || aiTitle || summary || lastPrompt || firstPrompt || null;
+}
+
+/**
+ * Build a paginated getSessionMessages response.
+ *
+ * Returns the most recent `limit` turns when `beforeTurn` is omitted, or
+ * the `limit` turns ending just before `beforeTurn` when provided. Turn
+ * indices are 0-based over the *filtered* message list (interruption
+ * markers removed).
+ *
+ * Response shape:
+ *   { success, messages, sessionTitle, fromTurn, toTurn, totalTurns, hasMore, cursorReset }
+ *
+ * cursorReset=true means the requested beforeTurn exceeds the current
+ * history length (e.g. new messages arrived since the client computed its
+ * cursor); the client should discard its cached history and reload from
+ * scratch.
+ *
+ * A missing transcript is reported as `{success: false, missing: true}` —
+ * the same contract as buildSessionMessagesPayload — so Java clears the
+ * stale session ID instead of falling back to the full-history read.
+ *
+ * On any unexpected error the caller falls back to buildSessionMessagesPayload
+ * (full history) so the user never sees an empty chat.
+ */
+export function buildSessionMessagesPagePayload(sessionFile, beforeTurn = null, limit = 30) {
+  if (!existsSync(sessionFile)) {
+    // Match the full-history contract so a pruned transcript retires its ID.
+    return {
+      success: false,
+      missing: true,
+      error: 'Session history file not found',
+      messages: [],
+    };
+  }
+
+  const content = readFileSync(sessionFile, 'utf8');
+  const parsed = parseJsonlContent(content);
+  const sessionTitle = extractSessionTitle(parsed.messages);
+  const messages = selectConversationChain(parsed.messages)
+    .filter(msg => !(msg.type === 'user' && isInterruptionMarker(msg)))
+    .flatMap(msg => {
+      if (msg.type === 'attachment' && extractTaskNotificationXml(msg) !== null) {
+        return [{
+          type: 'user',
+          message: { role: 'user', content: extractTaskNotificationXml(msg) },
+        }];
+      }
+      return [msg];
+    });
+
+  // Group messages into turns. A turn starts at a user message and includes
+  // all following assistant/tool messages until the next user message.
+  const turns = [];
+  let currentTurn = null;
+  for (const msg of messages) {
+    if (isTurnStart(msg)) {
+      if (currentTurn !== null) {
+        turns.push(currentTurn);
+      }
+      currentTurn = [msg];
+    } else if (currentTurn !== null) {
+      currentTurn.push(msg);
+    } else {
+      // Messages before the first user message (e.g. system records) form
+      // their own implicit turn so they are not lost.
+      currentTurn = [msg];
+    }
+  }
+  if (currentTurn !== null) {
+    turns.push(currentTurn);
+  }
+
+  const totalTurns = turns.length;
+
+  // Validate cursor
+  let effectiveBeforeTurn = beforeTurn;
+  let cursorReset = false;
+  if (effectiveBeforeTurn !== null && (effectiveBeforeTurn < 0 || effectiveBeforeTurn > totalTurns)) {
+    cursorReset = true;
+    effectiveBeforeTurn = null; // fall back to latest page
+  }
+
+  let fromTurn;
+  let toTurn;
+  if (effectiveBeforeTurn === null) {
+    // Latest page
+    toTurn = totalTurns;
+    fromTurn = Math.max(0, toTurn - limit);
+  } else {
+    // Earlier page
+    toTurn = effectiveBeforeTurn;
+    fromTurn = Math.max(0, toTurn - limit);
+  }
+
+  const pageTurns = turns.slice(fromTurn, toTurn);
+  const pageMessages = pageTurns.flat();
+
+  return {
+    success: true,
+    messages: pageMessages,
+    sessionTitle,
+    fromTurn,
+    toTurn,
+    totalTurns,
+    hasMore: fromTurn > 0,
+    cursorReset,
+  };
+}
+
+/**
+ * Get a paginated slice of session history messages.
+ * Writes the result as a single NDJSON line to stdout.
+ */
+export async function getSessionMessagesPage(sessionId, cwd = null, beforeTurn = null, limit = 30) {
+  try {
+    const sessionFile = resolveSessionFile(sessionId, cwd);
+    await writeJsonResponse(buildSessionMessagesPagePayload(sessionFile, beforeTurn, limit));
+  } catch (error) {
+    console.error('[GET_SESSION_PAGE_ERROR]', error.message);
+    await writeJsonResponse({
+      success: false,
+      error: error.message
+    });
+  }
+}

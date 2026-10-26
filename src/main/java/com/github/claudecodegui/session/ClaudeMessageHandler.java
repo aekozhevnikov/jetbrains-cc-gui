@@ -15,9 +15,12 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 import com.intellij.openapi.project.Project;
+import com.intellij.util.concurrency.AppExecutorUtil;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Claude message callback handler.
@@ -37,6 +40,10 @@ public class ClaudeMessageHandler implements MessageCallback {
 
     // Content accumulator for the current assistant message
     private final StringBuilder assistantContent = new StringBuilder();
+    private final StringBuilder pendingDelta = new StringBuilder();
+    private String pendingDeltaType;
+    private ScheduledFuture<?> materializationTask;
+    private long materializationGeneration;
 
     // Current assistant message object being processed
     private Message currentAssistantMessage = null;
@@ -94,6 +101,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         this.messageMerger = messageMerger;
         this.gson = gson;
         this.settingsService = settingsService != null ? settingsService : new CodemossSettingsService();
+        state.setMessageMaterializer(this::flushPendingDelta);
     }
 
     /**
@@ -137,6 +145,9 @@ public class ClaudeMessageHandler implements MessageCallback {
                 break;
         }
         synchronized (state.getMessageStateLock()) {
+            if (!type.equals(pendingDeltaType)) {
+                flushPendingDeltaAndNotify();
+            }
             // Every case runs under the message lock: the handlers below mutate the
             // live list and the raw trees nested in it, which the transport snapshot
             // walks on another thread.
@@ -203,6 +214,7 @@ public class ClaudeMessageHandler implements MessageCallback {
     @Override
     public void onError(String error) {
         synchronized (state.getMessageStateLock()) {
+            flushPendingDelta();
             if (errorReportedThisTurn && error != null && error.equals(lastReportedError)) {
                 LOG.debug("Suppressing duplicate error for current Claude turn");
                 return;
@@ -254,6 +266,7 @@ public class ClaudeMessageHandler implements MessageCallback {
     @Override
     public void onComplete(SDKResult result) {
         synchronized (state.getMessageStateLock()) {
+            flushPendingDelta();
             if (streamEndedThisTurn) {
                 streamEndedThisTurn = false;
                 errorReportedThisTurn = false;
@@ -496,9 +509,7 @@ public class ClaudeMessageHandler implements MessageCallback {
         assistantContent.append(novelContent);
 
         ensureCurrentAssistantMessageExists();
-        currentAssistantMessage.content = assistantContent.toString();
-        applyTextDeltaToRaw(novelContent);
-        textSegmentActive = true;
+        queueDelta("content_delta", novelContent, !textSegmentActive);
 
         callbackHandler.notifyContentDelta(novelContent);
         // During streaming, skip the full message update: the delta channel
@@ -692,6 +703,7 @@ public class ClaudeMessageHandler implements MessageCallback {
             // streaming pipeline for the duration of the file access.
             String pricingModel = resolvePricingModel(state.getModel());
             synchronized (state.getMessageStateLock()) {
+                flushPendingDelta();
                 if (currentAssistantMessage == null || currentAssistantMessage.raw == null) {
                     return;
                 }
@@ -901,17 +913,56 @@ public class ClaudeMessageHandler implements MessageCallback {
             LOG.debug("Skipping replayed thinking delta (len=" + content.length() + ")");
             return;
         }
-        boolean applied = applyThinkingDeltaToRaw(novelContent);
-        if (applied) {
-            thinkingSegmentActive = true;
-            // CRITICAL: Only notify frontend when delta was actually applied.
-            // Frontend has no dedup and will accumulate, causing duplication.
-            callbackHandler.notifyThinkingDelta(novelContent);
-            // Thinking blocks are structural: the frontend renders them from
-            // raw blocks in collapsible UI sections, so raw must stay in sync.
-            callbackHandler.notifyMessageUpdate(state.getMessages());
+        textSegmentActive = false;
+        queueDelta("thinking_delta", novelContent, !thinkingSegmentActive);
+        callbackHandler.notifyThinkingDelta(novelContent);
+    }
+
+    private void queueDelta(String type, String delta, boolean firstInSegment) {
+        pendingDeltaType = type;
+        pendingDelta.append(delta);
+        if (firstInSegment || !isStreaming) {
+            flushPendingDeltaAndNotify();
+        } else if (materializationTask == null) {
+            long generation = ++materializationGeneration;
+            materializationTask = AppExecutorUtil.getAppScheduledExecutorService().schedule(() -> {
+                synchronized (state.getMessageStateLock()) {
+                    if (generation == materializationGeneration) {
+                        flushPendingDeltaAndNotify();
+                    }
+                }
+            }, 33, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void flushPendingDelta() {
+        if (materializationTask != null) {
+            materializationTask.cancel(false);
+            materializationTask = null;
+        }
+        materializationGeneration++;
+        if (pendingDelta.length() == 0) {
+            return;
+        }
+        String delta = pendingDelta.toString();
+        String type = pendingDeltaType;
+        pendingDelta.setLength(0);
+        pendingDeltaType = null;
+        if ("content_delta".equals(type)) {
+            currentAssistantMessage.content = assistantContent.toString();
+            applyTextDeltaToRaw(delta);
+            textSegmentActive = true;
         } else {
-            LOG.debug("Skipping duplicate thinking delta (len=" + content.length() + ")");
+            applyThinkingDeltaToRaw(delta);
+            thinkingSegmentActive = true;
+        }
+    }
+
+    private void flushPendingDeltaAndNotify() {
+        boolean thinking = "thinking_delta".equals(pendingDeltaType);
+        flushPendingDelta();
+        if (thinking) {
+            callbackHandler.notifyMessageUpdate(state.getMessages());
         }
     }
 

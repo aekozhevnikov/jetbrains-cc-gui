@@ -1,5 +1,5 @@
 // hooks/useSettingsBasicActions.ts
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useSyncExternalStore } from 'react';
 export type { UiFontConfig, CodeFontConfig } from '../../../types/uiFontConfig';
 import type { UiFontConfig, CodeFontConfig } from '../../../types/uiFontConfig';
 import type { CommitAiConfig, CommitAiProvider } from '../../../types/aiFeatureConfig';
@@ -26,12 +26,16 @@ import {
   setDetailedOutputEnabled,
   type DetailedOutputEnabledChangedDetail,
 } from '../../../utils/detailedOutputPreference';
+import { bashGroupCollapsePreference } from '../../../utils/bashGroupCollapsePreference';
+import { editGroupCollapsePreference } from '../../../utils/editGroupCollapsePreference';
 
 const sendToJava = (message: string) => {
   if (window.sendToJava) {
     window.sendToJava(message);
   }
 };
+
+export type CodexSandboxModeOption = 'read-only' | 'workspace-write' | 'danger-full-access';
 
 export interface UseSettingsBasicActionsProps {
   streamingEnabledProp?: boolean;
@@ -42,6 +46,18 @@ export interface UseSettingsBasicActionsProps {
   onAutoOpenFileEnabledChangeProp?: (enabled: boolean) => void;
   permissionDialogTimeoutSecondsProp?: number;
   onPermissionDialogTimeoutChangeProp?: (seconds: number) => void;
+  /**
+   * Live Codex access scope owned by the chat state. The chat sends this value
+   * with every turn, so it is the only truthful source for the panel — the
+   * Java-side legacy `codexSandboxMode` record is never consulted at runtime.
+   */
+  codexSandboxSelectionProp?: CodexSandboxModeOption;
+  /** Provenance of the current scope: 'user' | 'native' | 'migrated' | 'default'. */
+  codexSandboxSourceProp?: string;
+  /** Sandbox the app-server last confirmed; null means "not confirmed yet". */
+  codexSandboxEffectiveProp?: CodexSandboxModeOption | null;
+  /** Writes the choice back into the chat state so the next turn keeps it. */
+  onCodexSandboxSelectionChangeProp?: (mode: CodexSandboxModeOption) => void;
   /** Current chat CLI — prompt enhancer auto mode follows this when available. */
   currentProvider?: string;
 }
@@ -80,7 +96,13 @@ export interface UseSettingsBasicActionsReturn {
   /** Streaming enabled state (prefers prop over local state) */
   streamingEnabled: boolean;
   localStreamingEnabled: boolean;
-  codexSandboxMode: 'workspace-write' | 'danger-full-access';
+  codexSandboxMode: CodexSandboxModeOption;
+  codexSandboxSource: string;
+  /** The scope the next turn will send (same source of truth as the radio). */
+  codexSandboxDesired: CodexSandboxModeOption;
+  /** Last confirmed sandbox, or null when the runtime has not reported one. */
+  codexSandboxEffective: CodexSandboxModeOption | null;
+  codexSandboxConflict: boolean;
   /** Send shortcut state (prefers prop over local state) */
   sendShortcut: 'enter' | 'cmdEnter';
   localSendShortcut: 'enter' | 'cmdEnter';
@@ -96,6 +118,10 @@ export interface UseSettingsBasicActionsReturn {
   selectedSound: string;
   customSoundPath: string;
   diffExpandedByDefault: boolean;
+  bashGroupCollapsedByDefault: boolean;
+  handleBashGroupCollapsedByDefaultChange: (collapsed: boolean) => void;
+  editGroupCollapsedByDefault: boolean;
+  handleEditGroupCollapsedByDefaultChange: (collapsed: boolean) => void;
   historyCompletionEnabled: boolean;
   /** Whether to skip the "create new session with existing messages" confirm dialog. */
   skipNewSessionConfirm: boolean;
@@ -128,7 +154,7 @@ export interface UseSettingsBasicActionsReturn {
   handleSaveCodeFontCustomPath: (path: string) => void;
   handleBrowseCodeFontFile: () => void;
   handleStreamingEnabledChange: (enabled: boolean) => void;
-  handleCodexSandboxModeChange: (mode: 'workspace-write' | 'danger-full-access') => void;
+  handleCodexSandboxModeChange: (mode: 'read-only' | 'workspace-write' | 'danger-full-access') => void;
   handleSendShortcutChange: (shortcut: 'enter' | 'cmdEnter') => void;
   handleAutoOpenFileEnabledChange: (enabled: boolean) => void;
   handleSoundNotificationEnabledChange: (enabled: boolean) => void;
@@ -184,7 +210,8 @@ export interface UseSettingsBasicActionsReturn {
   /** @internal */ setUiFontConfig: (config: UiFontConfig | undefined) => void;
   /** @internal */ setCodeFontConfig: (config: CodeFontConfig | undefined) => void;
   /** @internal */ setLocalStreamingEnabled: (enabled: boolean) => void;
-  /** @internal */ setCodexSandboxMode: (mode: 'workspace-write' | 'danger-full-access') => void;
+  /** @internal */ setCodexSandboxMode: (mode: 'read-only' | 'workspace-write' | 'danger-full-access') => void;
+  /** @internal */ setCodexSandboxSource: (source: string) => void;
   /** @internal */ setLocalSendShortcut: (shortcut: 'enter' | 'cmdEnter') => void;
   /** @internal */ setLocalAutoOpenFileEnabled: (enabled: boolean) => void;
   /** @internal */ setCommitPrompt: (prompt: string) => void;
@@ -218,6 +245,10 @@ export function useSettingsBasicActions({
   onAutoOpenFileEnabledChangeProp,
   permissionDialogTimeoutSecondsProp,
   onPermissionDialogTimeoutChangeProp,
+  codexSandboxSelectionProp,
+  codexSandboxSourceProp,
+  codexSandboxEffectiveProp,
+  onCodexSandboxSelectionChangeProp,
   currentProvider,
 }: UseSettingsBasicActionsProps): UseSettingsBasicActionsReturn {
   // Node.js path
@@ -259,9 +290,18 @@ export function useSettingsBasicActions({
   const [localStreamingEnabled, setLocalStreamingEnabled] = useState<boolean>(false);
   const streamingEnabled = streamingEnabledProp ?? localStreamingEnabled;
 
-  const [codexSandboxMode, setCodexSandboxMode] = useState<'workspace-write' | 'danger-full-access'>(
-    'danger-full-access'
-  );
+  // Codex access scope - prefer the chat-owned props (the value every turn
+  // actually sends), fall back to the Java legacy record only when no chat
+  // state was handed in. `effective` stays null until the runtime confirms a
+  // policy: showing the requested value there was the reported lie.
+  const [codexSandboxMode, setCodexSandboxMode] = useState<CodexSandboxModeOption>('workspace-write');
+  const [codexSandboxSource, setCodexSandboxSource] = useState('default');
+  const hasChatSandbox = codexSandboxSelectionProp !== undefined;
+  const effectiveCodexSandboxMode = hasChatSandbox ? codexSandboxSelectionProp : codexSandboxMode;
+  const effectiveCodexSandboxSource = hasChatSandbox ? (codexSandboxSourceProp ?? 'default') : codexSandboxSource;
+  // `effective` is only ever the runtime-confirmed policy: null until the
+  // app-server reports one. Showing the requested value here was the reported lie.
+  const codexSandboxEffective = hasChatSandbox ? (codexSandboxEffectiveProp ?? null) : null;
 
   // Send shortcut configuration - prefer props, fallback to local state
   const [localSendShortcut, setLocalSendShortcut] = useState<'enter' | 'cmdEnter'>('enter');
@@ -293,6 +333,16 @@ export function useSettingsBasicActions({
       return false;
     }
   });
+
+  // Independent batch command and file edit display preferences (localStorage-only).
+  const bashGroupCollapsedByDefault = useSyncExternalStore(
+    bashGroupCollapsePreference.subscribe,
+    bashGroupCollapsePreference.get,
+  );
+  const editGroupCollapsedByDefault = useSyncExternalStore(
+    editGroupCollapsePreference.subscribe,
+    editGroupCollapsePreference.get,
+  );
 
   // History completion toggle configuration
   const [historyCompletionEnabled, setHistoryCompletionEnabled] = useState<boolean>(() => {
@@ -484,11 +534,18 @@ export function useSettingsBasicActions({
     }
   }, [onStreamingEnabledChangeProp]);
 
-  const handleCodexSandboxModeChange = useCallback((mode: 'workspace-write' | 'danger-full-access') => {
+  const handleCodexSandboxModeChange = useCallback((mode: CodexSandboxModeOption) => {
     setCodexSandboxMode(mode);
+    setCodexSandboxSource('user');
+    // The chat state is what every turn sends; without this the next message
+    // would overwrite the new scope with the stale one.
+    onCodexSandboxSelectionChangeProp?.(mode);
     const payload = { sandboxMode: mode };
     sendToJava(`set_codex_sandbox_mode:${JSON.stringify(payload)}`);
-  }, []);
+    // New Codex handlers receive provenance and validate the independent
+    // access range; the legacy message above remains for older hosts.
+    sendToJava(`set_codex_sandbox_selection:${JSON.stringify({ selection: mode, source: 'user' })}`);
+  }, [onCodexSandboxSelectionChangeProp]);
 
   // Send shortcut change handler
   const handleSendShortcutChange = useCallback((shortcut: 'enter' | 'cmdEnter') => {
@@ -833,8 +890,13 @@ export function useSettingsBasicActions({
     localStreamingEnabled,
     setLocalStreamingEnabled,
     streamingEnabled,
-    codexSandboxMode,
+    codexSandboxMode: effectiveCodexSandboxMode,
     setCodexSandboxMode,
+    codexSandboxSource: effectiveCodexSandboxSource,
+    setCodexSandboxSource,
+    codexSandboxDesired: effectiveCodexSandboxMode,
+    codexSandboxEffective,
+    codexSandboxConflict: false,
     localSendShortcut,
     setLocalSendShortcut,
     sendShortcut,
@@ -855,6 +917,10 @@ export function useSettingsBasicActions({
     setCustomSoundPath,
     diffExpandedByDefault,
     setDiffExpandedByDefault,
+    bashGroupCollapsedByDefault,
+    handleBashGroupCollapsedByDefaultChange: bashGroupCollapsePreference.set,
+    editGroupCollapsedByDefault,
+    handleEditGroupCollapsedByDefaultChange: editGroupCollapsePreference.set,
     historyCompletionEnabled,
     setHistoryCompletionEnabled,
     skipNewSessionConfirm,

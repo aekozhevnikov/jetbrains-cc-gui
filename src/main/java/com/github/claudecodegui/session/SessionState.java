@@ -110,18 +110,39 @@ public class SessionState {
     private volatile String error = null;
     // Claims and releases share messageStateLock with history application.
     private volatile Object loadingOwner;
+    private volatile Object turnOwner = new Object();
 
     // Message history is also updated by daemon reader and history-loader threads.
     // Every message callback and history replacement takes this lock so a transport
     // snapshot never traverses a list or raw tree while another thread is changing it.
     private final Object messageStateLock = new Object();
     private final List<ClaudeSession.Message> messages = new ArrayList<>();
+    private Runnable messageMaterializer = () -> { };
 
-    // Session metadata — cwd is written in handler thread before send(), read inside send();
-    // the happens-before from CompletableFuture.runAsync guarantees visibility, so volatile is not required.
+    void setMessageMaterializer(Runnable materializer) {
+        synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = materializer;
+        }
+    }
+
+    // Session metadata — cwd is also written from the daemon event thread
+    // (thread/settings/updated) while send() reads it on another thread, so
+    // volatile is required; there is no happens-before between those threads.
     private String summary = null;
     private long lastModifiedTime = System.currentTimeMillis();
-    private String cwd = null;
+    private volatile String cwd = null;
+    private volatile boolean codexCwdExplicit;
+
+    /** Records a user directory change separately from a restored native directory. */
+    public void setCodexCwdExplicit(boolean explicit) {
+        this.codexCwdExplicit = explicit;
+    }
+
+    /** Returns whether the current Codex thread has an explicit directory override. */
+    public boolean isCodexCwdExplicit() {
+        return this.codexCwdExplicit;
+    }
 
     // Configuration fields below are volatile because set_mode / set_model / set_provider
     // and send_message may execute on different async handler threads with no other
@@ -157,6 +178,26 @@ public class SessionState {
         return busy;
     }
 
+    /** Starts a send before any previous provider process has finished shutting down. */
+    public Object beginTurn() {
+        synchronized (messageStateLock) {
+            turnOwner = new Object();
+            busy = true;
+            loading = true;
+            loadingOwner = null;
+            error = null;
+            return turnOwner;
+        }
+    }
+
+    public Object getTurnOwner() {
+        return turnOwner;
+    }
+
+    public boolean isCurrentTurn(Object owner) {
+        return turnOwner == owner;
+    }
+
     public boolean isLoading() {
         return loading;
     }
@@ -176,6 +217,7 @@ public class SessionState {
      */
     public List<ClaudeSession.Message> getMessages() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
             return new ArrayList<>(messages);
         }
     }
@@ -187,6 +229,7 @@ public class SessionState {
      */
     List<ClaudeSession.Message> getMessagesSnapshot() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
             return StreamMessageCoalescer.copyMessagesForTransport(messages);
         }
     }
@@ -369,6 +412,20 @@ public class SessionState {
     }
 
     /**
+     * Store the model id exactly as given, skipping retired-id migration.
+     *
+     * <p>Used for explicit user selections (the webview's {@code set_model}), where
+     * the id may be a user-defined custom model. The user typed that id on
+     * purpose, so it must reach the CLI unchanged even if it is in the retired
+     * table - the API error is the right feedback, not a silent substitute.
+     * Restore paths (persisted tab state, history, session templates) keep using
+     * {@link #setModel(String)} so stale built-in ids still self-heal.</p>
+     */
+    public void setModelVerbatim(String model) {
+        this.model = model == null ? null : model.trim();
+    }
+
+    /**
      * Migrate retired Claude model ids to their live replacement on write.
      *
      * <p>Persisted tab state (.idea/claudeCodeTabState.xml) and history sessions keep
@@ -377,6 +434,10 @@ public class SessionState {
      * pinned to a dead model that fails on every send ("It may not exist or you may
      * not have access to it") - see #1678. Migrating here self-heals restored tabs
      * without touching the persisted XML.</p>
+     *
+     * <p>Only ids that actually fail at the API belong here. claude-opus-4-6 is still
+     * served and is commonly added as a custom model, so it is intentionally absent:
+     * listing it rewrote the user's explicit choice to opus-5.</p>
      *
      * @param model raw model id (may be null, blank, carry a [1m] suffix, or be retired)
      * @return the model id to store - retired ids mapped to their live replacement,
@@ -402,7 +463,6 @@ public class SessionState {
             case "claude-sonnet-4-7":
                 base = "claude-sonnet-5";
                 break;
-            case "claude-opus-4-6":
             case "claude-opus-4-8":
                 base = "claude-opus-5";
                 break;
@@ -478,8 +538,22 @@ public class SessionState {
      */
     public void replaceMessages(List<ClaudeSession.Message> replacementMessages) {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = () -> { };
             messages.clear();
             messages.addAll(replacementMessages);
+        }
+    }
+
+    /**
+     * Prepend earlier history messages atomically.
+     *
+     * @param earlierMessages the already parsed, older messages
+     */
+    public void prependMessages(List<ClaudeSession.Message> earlierMessages) {
+        synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messages.addAll(0, earlierMessages);
         }
     }
 
@@ -488,6 +562,8 @@ public class SessionState {
      */
     public void clearMessages() {
         synchronized (messageStateLock) {
+            messageMaterializer.run();
+            messageMaterializer = () -> { };
             messages.clear();
         }
     }

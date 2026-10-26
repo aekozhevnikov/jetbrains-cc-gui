@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { convertAtFileRefsToLinks } from './CollapsibleTextBlock';
+import { convertAtFileRefsToLinks } from './convertAtFileRefsToLinks';
 
 describe('convertAtFileRefsToLinks', () => {
   // ── 基本路径匹配 ──────────────────────────────────
@@ -140,6 +140,29 @@ describe('convertAtFileRefsToLinks', () => {
     expect(result).toBe('@你好');
   });
 
+  it('does not convert SSH-style git addresses', () => {
+    const input =
+      '添加一个远程仓库： git@example.com:example-org/example-repo.git 然后push';
+    const result = convertAtFileRefsToLinks(input);
+    // 整个地址原样保留，不能塌缩成 @example-repo.git
+    expect(result).not.toContain('data-linkify');
+    expect(result).toBe(input);
+  });
+
+  it('does not convert email addresses', () => {
+    const result = convertAtFileRefsToLinks('联系 user@example.com 谢谢');
+    expect(result).not.toContain('data-linkify');
+    expect(result).toBe('联系 user@example.com 谢谢');
+  });
+
+  it('still converts a ref glued to a non-ASCII character', () => {
+    // 中文不构成地址前缀，@ 后仍是文件引用
+    const result = convertAtFileRefsToLinks('见@C:\\src\\app.ts');
+    expect(result).toContain(
+      '<a class="file-link" data-linkify="file" href="C:\\src\\app.ts" title="C:\\src\\app.ts">@app.ts</a>'
+    );
+  });
+
   // ── @@ 转义 ───────────────────────────────────────
 
   it('preserves @@ as literal text', () => {
@@ -180,15 +203,14 @@ describe('convertAtFileRefsToLinks', () => {
     );
   });
 
-  it('handles adjacent @refs', () => {
+  it('treats a second @ glued to a word as an address, not a new ref', () => {
     const result = convertAtFileRefsToLinks('@a.ts@b.ts');
-    // 第一个 @ 消耗 a.ts，第二个 @ 消耗 b.ts
+    // 第一个 @ 消耗 a.ts；第二个 @ 紧贴字母 s，视为地址分隔符
     expect(result).toContain(
       '<a class="file-link" data-linkify="file" href="a.ts" title="a.ts">@a.ts</a>'
     );
-    expect(result).toContain(
-      '<a class="file-link" data-linkify="file" href="b.ts" title="b.ts">@b.ts</a>'
-    );
+    expect(result).toContain('@b.ts');
+    expect(result).not.toContain('href="b.ts"');
   });
 
   // ── 边界条件 ──────────────────────────────────────

@@ -1,4 +1,5 @@
 import type { TFunction } from 'i18next';
+import { PlanUsageTooltip } from './PlanUsageTooltip';
 
 interface PlanUsageLoadingProps {
   t: TFunction;
@@ -8,12 +9,11 @@ interface PlanUsageLoadingProps {
 export const PlanUsageLoading = ({ t }: PlanUsageLoadingProps) => {
   const label = t('chat.planUsage.loading', { defaultValue: 'Loading usage…' });
   return (
-    <div
-      className="plan-usage loading has-tooltip"
-      data-tooltip={label}
-      aria-label={label}
+    <PlanUsageTooltip
+      className="plan-usage loading"
+      tooltip={label}
     >
       <span className="plan-usage-label">…</span>
-    </div>
+    </PlanUsageTooltip>
   );
 };

@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, memo, useEffect, useRef } from 'react';
 import type { TFunction } from 'i18next';
 import type { ClaudeMessage, ClaudeContentBlock, ToolResultBlock } from '../../types';
 
-import { isProviderNotConfiguredError } from './ProviderNotConfiguredCard';
+import { isProviderNotConfiguredError } from './providerNotConfigured';
 import { matchErrorPattern } from '../../utils/errorMatcher';
 import { UserMessageHeader, AssistantMessageActions, MessageRoleLabel } from './MessageActionButtons';
 import { MessageDurationFooter } from './MessageDurationFooter';
@@ -10,10 +10,9 @@ import { GroupedBlocksRenderer } from './GroupedBlocksRenderer';
 import { copyToClipboard } from '../../utils/copyUtils';
 import { quoteToChatInput } from '../../utils/quoteUtils';
 import { isNonRenderedToolUse } from '../../utils/toolConstants';
+import { shouldRevealThinking } from '../../utils/thinkingVisibility';
 import { groupBlocks } from './groupBlocks';
-
-// Re-exported so existing imports (`groupBlocks.test.ts`) keep working.
-export { groupBlocks };
+import { ImageBlock } from './blocks/ImageBlock';
 
 export interface MessageItemProps {
   message: ClaudeMessage;
@@ -159,14 +158,21 @@ export const MessageItem = memo(function MessageItem({
   // non-rendered tools never disturb the message list. `blocks` is kept whole
   // for the empty-placeholder check below, since a message carrying only a
   // non-rendered tool is not an empty streaming placeholder.
+  // Empty native reasoning cannot create a row or interrupt a visible tool batch.
   const renderedBlocks = useMemo(
-    () => blocks.filter((block) => !isNonRenderedToolUse(block, isMessageStreaming)),
+    () => blocks.filter((block) => shouldRevealThinking(block) && !isNonRenderedToolUse(block, isMessageStreaming)),
     [blocks, isMessageStreaming],
   );
   const isUserImageOnly =
     message.type === 'user' &&
     renderedBlocks.length > 0 &&
     renderedBlocks.every((block) => block.type === 'image');
+  const isCompactionBoundary = typeof message.raw === 'object' && message.raw?.isCompactSummary === true;
+  const userImages = useMemo(() => message.type === 'user'
+    ? renderedBlocks.filter((block): block is Extract<ClaudeContentBlock, { type: 'image' }> => block.type === 'image')
+    : [], [message.type, renderedBlocks]);
+  const bubbleBlocks = useMemo(() => message.type === 'user'
+    ? renderedBlocks.filter((block) => block.type !== 'image') : renderedBlocks, [message.type, renderedBlocks]);
   const isEmptyStreamingPlaceholder =
     message.type === 'assistant' &&
     isMessageStreaming &&
@@ -182,43 +188,42 @@ export const MessageItem = memo(function MessageItem({
     return () => window.clearTimeout(timer);
   }, [isEmptyStreamingPlaceholder]);
 
-  // Ref to track the last auto-expanded thinking block index to avoid overriding user interaction
-  const lastAutoExpandedIndexRef = useRef<number>(-1);
-
-  // Auto-expand the latest thinking block during streaming
-  useEffect(() => {
-    if (!isMessageStreaming) return;
-
-    const thinkingIndices: number[] = [];
-    renderedBlocks.forEach((block, index) => {
-      if (block.type === 'thinking') thinkingIndices.push(index);
-    });
-
-    if (thinkingIndices.length === 0) return;
-
-    const lastThinkingIndex = thinkingIndices[thinkingIndices.length - 1];
-
-    if (lastThinkingIndex !== lastAutoExpandedIndexRef.current) {
-      setExpandedThinking((prev) => {
-        const newState = { ...prev };
-        // Only collapse thinking blocks that were NOT manually expanded by the user
-        thinkingIndices.forEach((idx) => {
-          // Preserve manually expanded state
-          if (!manuallyExpandedThinking[idx]) {
-            newState[idx] = false;
-          }
-        });
-        // Auto-expand the latest one (unless user manually collapsed it)
-        if (!manuallyExpandedThinking[lastThinkingIndex] || prev[lastThinkingIndex] === undefined) {
-          newState[lastThinkingIndex] = true;
+  // Auto-expand the latest thinking block during streaming — render-time
+  // adjustment keyed on the last thinking block index (same transitions the
+  // old effect produced, without the extra commit). The tracked index avoids
+  // overriding user interaction with the same block.
+  const thinkingIndices: number[] = [];
+  renderedBlocks.forEach((block, index) => {
+    if (block.type === 'thinking') thinkingIndices.push(index);
+  });
+  const lastThinkingIndex = thinkingIndices.length > 0
+    ? thinkingIndices[thinkingIndices.length - 1]
+    : -1;
+  const [lastAutoExpandedIndex, setLastAutoExpandedIndex] = useState(-1);
+  if (
+    isMessageStreaming &&
+    lastThinkingIndex !== -1 &&
+    lastThinkingIndex !== lastAutoExpandedIndex
+  ) {
+    setLastAutoExpandedIndex(lastThinkingIndex);
+    setExpandedThinking((prev) => {
+      const newState = { ...prev };
+      // Only collapse thinking blocks that were NOT manually expanded by the user
+      thinkingIndices.forEach((idx) => {
+        // Preserve manually expanded state
+        if (!manuallyExpandedThinking[idx]) {
+          newState[idx] = false;
         }
-        return newState;
       });
-      lastAutoExpandedIndexRef.current = lastThinkingIndex;
-    }
-  }, [renderedBlocks, isMessageStreaming, manuallyExpandedThinking]);
+      // Auto-expand the latest one (unless user manually collapsed it)
+      if (!manuallyExpandedThinking[lastThinkingIndex] || prev[lastThinkingIndex] === undefined) {
+        newState[lastThinkingIndex] = true;
+      }
+      return newState;
+    });
+  }
 
-  const groupedBlocks = useMemo(() => groupBlocks(renderedBlocks), [renderedBlocks]);
+  const groupedBlocks = useMemo(() => groupBlocks(bubbleBlocks), [bubbleBlocks]);
 
   // Register user message DOM node for anchor navigation
   // Must be called before any early returns to satisfy React hooks rules
@@ -239,10 +244,13 @@ export const MessageItem = memo(function MessageItem({
   if (isEmptyStreamingPlaceholder && !showStreamingConnectHint) {
     return <></>;
   }
+  if (message.type === 'assistant' && blocks.length > 0 && renderedBlocks.length === 0) {
+    return <></>;
+  }
 
   return (
     <div
-      className={`message ${message.type}${isLast ? ' is-last-message' : ''}${isProviderNotConfigured ? ' provider-not-configured' : ''}`}
+      className={`message ${message.type}${currentProvider === 'codex' ? ' codex-message' : ''}${isCompactionBoundary ? ' compaction-message' : ''}${isLast ? ' is-last-message' : ''}${isProviderNotConfigured ? ' provider-not-configured' : ''}`}
       ref={anchorRefCallback}
       data-message-anchor-id={message.type === 'user' ? messageKey : undefined}
     >
@@ -270,7 +278,10 @@ export const MessageItem = memo(function MessageItem({
 
       <MessageRoleLabel messageType={message.type} />
 
-      <div className={`message-content${isUserImageOnly ? ' image-only' : ''}`}>
+      {userImages.length > 0 && <div className="user-message-images">
+        {userImages.map((block, index) => <ImageBlock key={`${index}:${block.src}`} block={block} messageType="user" t={t} />)}
+      </div>}
+      {!isUserImageOnly && <div className="message-content">
         <GroupedBlocksRenderer
           message={message}
           messageIndex={messageIndex}
@@ -283,7 +294,7 @@ export const MessageItem = memo(function MessageItem({
           isEmptyStreamingPlaceholder={isEmptyStreamingPlaceholder}
           currentProvider={currentProvider}
           groupedBlocks={groupedBlocks}
-          renderedBlockCount={renderedBlocks.length}
+          renderedBlockCount={bubbleBlocks.length}
           isMessageStreaming={isMessageStreaming}
           isThinking={isThinking}
           isLast={isLast}
@@ -292,7 +303,7 @@ export const MessageItem = memo(function MessageItem({
           onNavigateToProviderSettings={onNavigateToProviderSettings}
           onNavigateToDependencySettings={onNavigateToDependencySettings}
         />
-      </div>
+      </div>}
 
       <MessageDurationFooter
         message={message}

@@ -152,6 +152,24 @@ describe('MessageList paged collapse', () => {
     delete window.__codexHistoryPageInfo;
   });
 
+  it('does not re-extract unchanged message tools across 30 text updates', () => {
+    const historical: ClaudeMessage = { type: 'assistant', content: 'history' };
+    const getBlocks = vi.fn((_message: ClaudeMessage): ClaudeContentBlock[] => [{ type: 'tool_use', id: 'pending', name: 'Read', input: {} }]);
+    const lookup = vi.fn(noopFindToolResult);
+    const endRef = createRef<HTMLDivElement>();
+    const view = (tail: string) => <MessageList
+      messages={[historical, { type: 'assistant', content: tail }]}
+      messageKeys={['historical', 'tail']}
+      streamingActive isThinking={false} loading={false} loadingStartTime={null}
+      t={t} getMessageText={noopGetText} getContentBlocks={getBlocks}
+      findToolResult={lookup} extractMarkdownContent={noopExtractMd} messagesEndRef={endRef}
+    />;
+    const { rerender } = render(view(''));
+    for (let index = 0; index < 30; index += 1) rerender(view('x'.repeat(index + 1)));
+    expect(getBlocks.mock.calls.filter(([message]) => message === historical)).toHaveLength(1);
+    expect(lookup).toHaveBeenCalledTimes(32);
+  });
+
   it('renders all messages when there are at most five user turns', () => {
     renderList(makeMessages(10));
     expect(screen.getAllByTestId('message-item')).toHaveLength(10);

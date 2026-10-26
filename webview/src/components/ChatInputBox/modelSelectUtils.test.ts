@@ -3,11 +3,13 @@ import type { ModelInfo } from './types';
 import {
   buildModelDropdownSections,
   getModelProviderGroup,
+  modelMatchesSearchQuery,
   PINNED_GROUP_ID,
   PINNED_MODELS_STORAGE_KEY,
   readPinnedModelIds,
   shouldGroupModels,
   shouldShowModelSearch,
+  tokenizeSearchQuery,
   togglePinnedModelId,
   writePinnedModelIds,
 } from './modelSelectUtils';
@@ -81,6 +83,34 @@ describe('modelSelectUtils', () => {
       togglePinnedModelId('opencode', 'a');
       const raw = JSON.parse(localStorage.getItem(PINNED_MODELS_STORAGE_KEY) || '{}');
       expect(raw.opencode).toBeUndefined();
+    });
+  });
+
+  describe('tokenizeSearchQuery / modelMatchesSearchQuery', () => {
+    it('splits on whitespace and lowercases tokens', () => {
+      expect(tokenizeSearchQuery('  DeepSeek  FLASH ')).toEqual(['deepseek', 'flash']);
+      expect(tokenizeSearchQuery('   ')).toEqual([]);
+    });
+
+    it('matches empty token lists (no query) for any model', () => {
+      expect(modelMatchesSearchQuery([], { id: 'gpt-5.5', label: 'GPT-5.5' })).toBe(true);
+    });
+
+    it('matches a single token against id, label, or description', () => {
+      const fields = { id: 'opencode/big-pickle', label: 'opencode/Big-Pickle', description: 'Free model' };
+      expect(modelMatchesSearchQuery(['pickle'], fields)).toBe(true);
+      expect(modelMatchesSearchQuery(['big-pickle'], fields)).toBe(true);
+      expect(modelMatchesSearchQuery(['free'], fields)).toBe(true);
+      expect(modelMatchesSearchQuery(['gpt'], fields)).toBe(false);
+    });
+
+    it('AND-matches multi-word queries across different fields', () => {
+      const fields = { id: 'deepseek/deepseek-v4-flash-free', label: 'deepseek/Deepseek-V4-Flash-Free', description: 'DeepSeek free tier' };
+      // "deep" hits the id, "tier" only the description
+      expect(modelMatchesSearchQuery(['deep', 'tier'], fields)).toBe(true);
+      expect(modelMatchesSearchQuery(['deepseek', 'flash'], fields)).toBe(true);
+      // both words must be found somewhere
+      expect(modelMatchesSearchQuery(['deepseek', 'gpt'], fields)).toBe(false);
     });
   });
 

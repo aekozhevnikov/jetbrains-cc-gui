@@ -154,8 +154,30 @@
   }
 }
 
+/*
+ * Centered menus (trigger owns `transform: translateX(-50%)`) need the offset
+ * inside the keyframes: animation values beat inline styles, so the frames
+ * above would drop the centering for the whole 150ms and the menu would snap
+ * half a width sideways when the animation ends.
+ */
+@keyframes selector-dropdown-in-centered {
+  from {
+    opacity: 0;
+    transform: translate(-50%, var(--selector-enter-y));
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.selector-dropdown.selector-dropdown--centered {
+  animation-name: selector-dropdown-in-centered;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .selector-dropdown {
+  .selector-dropdown,
+  .selector-dropdown.selector-dropdown--centered {
     animation: none;
   }
 }
@@ -185,6 +207,17 @@
   background: var(--dropdown-selected);
 }
 
+/* Row navigated to with ↑↓ from the model search input */
+.selector-option.keyboard-highlighted {
+  background: var(--dropdown-hover);
+  outline: 1px solid var(--accent-color);
+  outline-offset: -1px;
+}
+
+.selector-option.keyboard-highlighted.selected {
+  background: var(--dropdown-selected);
+}
+
 .selector-option .codicon {
   font-size: 14px;
   width: 16px;
@@ -208,6 +241,37 @@
 .provider-option-trailing .check-mark {
   margin-left: 0;
 }
+/* Provider switcher: keep its fixed-position menu within short viewports. */
+.provider-dropdown--scrollable {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+.provider-option-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Quota details must not displace the row currently under the pointer. */
+.provider-quota-panel {
+  box-sizing: border-box;
+  width: 220px;
+  min-width: 0;
+  overflow-y: auto;
+  white-space: normal;
+  /* Movement toward the list would briefly cover its click targets. */
+  animation: none;
+}
+
+.provider-dropdown [role="menuitemradio"]:focus-visible {
+  outline: 1px solid var(--accent-color);
+  outline-offset: -1px;
+  background: var(--dropdown-hover);
+}
+
 /* Provider switcher: hairline separators between rows */
 .provider-dropdown .selector-option + .selector-option {
   border-top: 1px solid var(--dropdown-border);
@@ -269,6 +333,21 @@
   user-select: none;
 }
 
+/* "Retired" tag for a custom Claude model whose id the API no longer serves */
+.model-retired-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.16);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  flex-shrink: 0;
+  user-select: none;
+}
+
 .selector-option .model-description {
   font-size: 11px;
   color: var(--text-secondary);
@@ -277,6 +356,9 @@
 }
 
 .selector-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 4px 8px;
 }
 
@@ -291,7 +373,7 @@
 
 .selector-search-input {
   box-sizing: border-box;
-  width: 100%;
+  flex: 1;
   min-width: 180px;
   padding: 5px 8px;
   border: 1px solid var(--dropdown-border);
@@ -305,6 +387,31 @@
 
 .selector-search-input:focus {
   border-color: var(--accent-color);
+}
+
+/* Clear (×) button next to the model search input */
+.selector-search-clear {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+}
+
+.selector-search-clear:hover {
+  background: var(--dropdown-hover);
+  color: var(--text-primary);
+}
+
+.selector-search-clear .codicon {
+  font-size: 11px;
 }
 
 /* Model dropdown: group headers + pin controls (OpenCode long catalogs) */

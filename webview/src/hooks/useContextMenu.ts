@@ -9,6 +9,9 @@ interface ContextMenuState {
   hasSelection: boolean;
   savedRange: Range | null;
   selectedText: string;
+  // href of the <a> under the right-click target, if any — lets menus offer
+  // "copy link address" even when no text is selected.
+  linkHref: string | null;
 }
 
 function placeCursorAfterRemoval(
@@ -54,7 +57,7 @@ function restoreRange(range: Range | null): void {
 
 export function useContextMenu() {
   const [state, setState] = useState<ContextMenuState>({
-    visible: false, x: 0, y: 0, hasSelection: false, savedRange: null, selectedText: '',
+    visible: false, x: 0, y: 0, hasSelection: false, savedRange: null, selectedText: '', linkHref: null,
   });
   const targetFileTagRef = useRef<HTMLElement | null>(null);
 
@@ -64,6 +67,8 @@ export function useContextMenu() {
     const textSelection = sel?.toString() ?? '';
     const fileTag = (e.target as HTMLElement | null)?.closest('.file-tag') as HTMLElement | null;
     const fileTagPath = fileTag?.getAttribute('data-file-path')?.trim() ?? '';
+    const linkAnchor = (e.target as HTMLElement | null)?.closest('a[href]') as HTMLAnchorElement | null;
+    const linkHref = linkAnchor?.getAttribute('href')?.trim() || null;
     // When right-clicking on a file tag, copy its full @path reference instead of misjudging as "no selection".
     const selectedText = textSelection.trim().length > 0
       ? textSelection
@@ -78,6 +83,7 @@ export function useContextMenu() {
       hasSelection,
       savedRange,
       selectedText,
+      linkHref,
     });
   }, []);
 

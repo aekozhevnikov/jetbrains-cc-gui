@@ -29,8 +29,9 @@ public class PathUtilsRealPathTest {
             assumeTrue("filesystem refuses symlink creation", linkCreated);
 
             // The CLI keys session storage off the physical path, so the lookup side
-            // must resolve the same way (issue #1789)
-            assertEquals(realDir.toString(), PathUtils.realPath(linkPath.toString()));
+            // must resolve the same way (issue #1789). macOS temp dirs live behind a
+            // /var -> /private/var symlink, so the expectation needs the physical path too.
+            assertEquals(realDir.toRealPath().toString(), PathUtils.realPath(linkPath.toString()));
         } finally {
             Files.deleteIfExists(linkPath);
             deleteRecursively(realDir);

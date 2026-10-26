@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import styles from './style.module.less';
 import { useTranslation } from 'react-i18next';
 import type { CodeFontConfig } from '../hooks/useSettingsBasicActions';
+import ListboxSelect from '../shared/ListboxSelect';
 
 const CODE_FONT_SELECT_ID = 'settings-code-font-select';
 const CODE_FONT_CUSTOM_PATH_ID = 'settings-code-font-custom-path';
@@ -60,6 +61,19 @@ const CodeFontSection = ({
         font: editorFontConfig?.fontFamily || currentCodeFontDisplayName,
       }));
 
+  const handleCodeFontSelectionChange = (nextSelection: string) => {
+    setSelectedCodeFontOption(nextSelection);
+
+    if (nextSelection === 'customFile' && hasSavedCustomCodeFont) {
+      onCodeFontSelectionChange(nextSelection);
+      return;
+    }
+
+    if (nextSelection === 'followEditor') {
+      onCodeFontSelectionChange(nextSelection);
+    }
+  };
+
   return (
     <div className={styles.editorFontSection}>
       <div className={styles.fieldHeader}>
@@ -68,34 +82,24 @@ const CodeFontSection = ({
           {t('settings.basic.codeFont.label')}
         </label>
       </div>
-      <select
+      <ListboxSelect
         id={CODE_FONT_SELECT_ID}
-        aria-label={t('settings.basic.codeFont.label')}
-        className={styles.languageSelect}
+        ariaLabel={t('settings.basic.codeFont.label')}
         value={selectedCodeFontOption}
-        onChange={(event) => {
-          const nextSelection = event.target.value;
-          setSelectedCodeFontOption(nextSelection);
-
-          if (nextSelection === 'customFile' && hasSavedCustomCodeFont) {
-            onCodeFontSelectionChange(nextSelection);
-            return;
-          }
-
-          if (nextSelection === 'followEditor') {
-            onCodeFontSelectionChange(nextSelection);
-          }
-        }}
-      >
-        <option value="followEditor">
-          {t('settings.basic.codeFont.followOption', { font: editorFontConfig?.fontFamily || '-' })}
-        </option>
-        <option value="customFile">
-          {customCodeFontFileName
-            ? `${t('settings.basic.codeFont.customOption')} / ${customCodeFontFileName}`
-            : t('settings.basic.codeFont.customOption')}
-        </option>
-      </select>
+        options={[
+          {
+            value: 'followEditor',
+            label: t('settings.basic.codeFont.followOption', { font: editorFontConfig?.fontFamily || '-' }),
+          },
+          {
+            value: 'customFile',
+            label: customCodeFontFileName
+              ? `${t('settings.basic.codeFont.customOption')} / ${customCodeFontFileName}`
+              : t('settings.basic.codeFont.customOption'),
+          },
+        ]}
+        onChange={handleCodeFontSelectionChange}
+      />
 
       {isCustomCodeFontSelected && (
         <div className={styles.nodePathSection} style={NODE_PATH_SECTION_STYLE}>

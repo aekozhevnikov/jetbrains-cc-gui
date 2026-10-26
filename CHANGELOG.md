@@ -1,3 +1,265 @@
+##### **2026年10月21日（v0.6.2）**
+
+English:
+
+✨ Features
+- **Keep your chat font size after restarting the IDE**: JCEF pages loaded through `loadHTML` cannot rely on `localStorage` surviving a restart, so the chosen scale level was lost every time the IDE reopened. The level (1–6) is now stored in `~/.codemoss/config.json` next to the UI font-family preference and restored through the existing startup font payload; explicit picks carry a request ID so a late bootstrap or an older acknowledgement cannot undo a newer choice, one shared store keeps Settings, the global `--font-scale` and the OSR repaint nudge in sync, an unreadable config file is rejected instead of replaced, and only a real legacy browser choice is migrated — the default is never pinned (by @gadfly3173)
+
+🔧 Improvements
+- **Restore chat tabs without downloading the same startup files again**: the compressed entry module and stylesheets are now fetched in parallel, with the entry no longer waiting for CSS, and reused through a cache bucket shared by every chat tab and IDE session; every cached byte is checked against a SHA-256 digest baked into the page before it is executed, `navigator.locks` makes tabs restored at the same time share one download, the bucket is trimmed to the newest 8 entries on upgrade, and when the IDE denies storage the network path plus the visible error fallback still work (by @Jefung, @zhukunpenglinyutong)
+- **Make Gradle builds resilient in CN**: the Aliyun public mirror is consulted before `mavenCentral` (direct connections to repo.maven.apache.org are frequently TLS-reset), and the foojay toolchain resolver lets Gradle provision the required JDK toolchain instead of failing when the local JDK does not match the target version (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- **Fix the Token Tracker dashboard crashing with `removeChild` errors** (#1951): the dashboard is a lazy chunk that imports React from the entry module, but the startup bootstrap evaluated the entry under a blob URL while lazy chunks resolved the canonical asset URL — opening the dashboard therefore loaded a second copy of the app and React, and the diverging trees threw “Failed to execute 'removeChild' on 'Node'”. The bootstrap now installs an import map that remaps the canonical entry URL onto the evaluated blob, so the entry (and its React instance) keeps a single module identity while the compressed bytes stay cached; reopening the dashboard reuses the running app instead of re-evaluating it (by @elexiang, @Jefung, @zhukunpenglinyutong)
+- **Keep the line range visible on long file references**: inserting a selection such as `@C:/workspace/src/.../PhysicalTestDataServiceImpl.java#L73-76` ellipsized the whole label, so the `#L73-76` part vanished; the range is now its own non-shrinking segment after the (still truncatable) filename, the tooltip keeps the full path with its range, and the request path comes from a dedicated `data-absolute-path` attribute instead of being derived from the display tooltip (by @elexiang)
+- **Show plugin skills that are declared as individual directories**: `plugin.json` may list `"skills": ["./skills/engineering/tdd"]` instead of one parent folder, but the scanner always treated the path it received as a parent directory, so such plugins silently contributed zero slash commands — no log line, no warning. A declared directory that itself contains a `SKILL.md` is now scanned as a skill, and a directory that is both a skill and holds child skills yields all of them (asset folders contain no `SKILL.md` and are skipped) (by @JackLin513, @zhukunpenglinyutong)
+- **Stop one broken skill from erasing the `$` Codex skill list**: a partial `skills/list` failure (one unreadable `SKILL.md`, invalid frontmatter, a stale skill under another cwd) reports an error while still returning valid skills, and the completion coordinator treated any error as fatal — publishing an empty list, erasing custom skills and marking the native catalog authoritative so the backend-scanned list was ignored for the rest of the session. Whatever the runtime did return is now published, an outright failed read keeps the backend-scanned fallback until real data arrives, and the warning still reaches Settings > Skills (by @zhukunpenglinyutong)
+- **Let subagents keep their own permission mode**: the `PreToolUse` hook read the parent's cached mode for every call, so a worker running under the native auto reviewer was forced back to “ask” as soon as the parent switched modes, and a worker's `EnterPlanMode` / `ExitPlanMode` mutated the parent Query or opened a parent plan-approval dialog. A recognized `permission_mode` from the hook input now wins for worker calls (identified by `agent_id`, not the also-main-thread `agent_type`), worker plan transitions, plan-file ownership and the SDK-only `dontAsk` / `bubble` modes yield to the native permission flow, and missing or unknown modes still fall back to the parent policy (by @gadfly3173)
+- **Stop pasted images from leaking between chat tabs**: drafts lived in `localStorage`, which every same-origin chat tab shares, so one webview's screenshots could be restored in another. Drafts now use `sessionStorage` — surviving input remounts and page reloads but never crossing webviews — the legacy shared draft is deliberately left behind because its owner is unknown, a failed or oversized save drops the previous draft so removed images stay removed, and a just-restored draft is not rewritten, so full storage cannot wipe what was restored (by @gadfly3173)
+- **Keep dropdown fly-outs attached to their row at any font zoom**: submenu geometry mixed zoomed `getBoundingClientRect` values with layout-pixel scroll sizes, so above 100% font zoom the reasoning fly-out drifted off its row and overflowed small viewports. The whole submenu layout is now computed in layout pixels, the natural content size is measured even when `maxHeight` clips the box, the main dropdown clamps its width to the viewport while matching its CSS floor, and open menus follow window resizes and content changes through a `ResizeObserver` instead of measuring once at open time (by @gadfly3173)
+
+中文：
+
+✨ 新功能
+- **重启 IDE 后保留聊天字号档位**：通过 `loadHTML` 加载的 JCEF 页面无法指望 `localStorage` 跨重启存活，因此每次重开 IDE 选好的字号档位都会丢失。档位（1–6）现在与 UI 字体偏好一起保存在 `~/.codemoss/config.json`，并通过已有的启动字体下发通道恢复；显式选择会带上请求 ID，迟到的引导配置或旧的确认回执都无法覆盖更新的选择，共享状态保证设置面板、全局 `--font-scale` 与 OSR 重绘补偿始终一致，配置无法读取时会被拒绝而不是被覆盖写入，且只会迁移真实存在的旧版浏览器选择——不会把默认值写死（by @gadfly3173）
+
+🔧 优化
+- **恢复聊天标签页时不再重复下载同一批启动资源**：压缩的入口模块与样式表改为并行加载（入口不再等 CSS），并通过跨聊天标签页共享的缓存复用；每个被复用的字节在执行前都会与页面内置的 SHA-256 摘要比对，`navigator.locks` 让同时恢复的标签页共享一次下载，升级时缓存只保留最新的 8 项，若 IDE 禁止存储则自动走网络路径并保留可见的错误提示（by @Jefung、@zhukunpenglinyutong）
+- **改善国内的 Gradle 构建可靠性**：优先使用阿里云公共镜像再访问 `mavenCentral`（直连 repo.maven.apache.org 经常被 TLS 重置），并引入 foojay 工具链解析器，让 Gradle 自动获取所需 JDK 工具链，而不是因本地 JDK 版本不匹配直接失败（by @zhukunpenglinyutong）
+
+🐛 修复
+- **修复 Token Tracker 面板报 `removeChild` 错误的问题**（#1951）：该面板是懒加载 chunk，会从入口模块导入 React，而启动引导用 blob URL 求值入口、懒加载 chunk 却解析规范的资源地址——于是打开面板会再加载一份应用与 React，两份实例的 DOM 树互相冲突，抛出 “Failed to execute 'removeChild' on 'Node'”。现在引导阶段注入 import map，把规范入口地址映射到已求值的 blob，入口（及其 React 实例）保持单一模块身份，压缩字节依旧走缓存；重复打开面板会复用正在运行的应用，不再重复求值（by @elexiang、@Jefung、@zhukunpenglinyutong）
+- **长文件引用不再丢掉行号范围**：插入 `@C:/workspace/src/.../PhysicalTestDataServiceImpl.java#L73-76` 这类选区引用时，整段标签会被省略号截断，`#L73-76` 直接看不见；现在行号范围是独立且不会被压缩的片段，文件名仍可截断，浮层保留带行号的完整路径，请求实际使用的路径改由独立的 `data-absolute-path` 属性提供，不再从展示用浮层反推（by @elexiang）
+- **修复按单个目录声明技能的插件不显示技能**：`plugin.json` 可能写成 `"skills": ["./skills/engineering/tdd"]` 而不是一个父目录，但扫描逻辑始终把收到的路径当父目录处理，导致这类插件的斜杠命令静默消失——既没有日志也没有警告。现在若声明目录自身包含 `SKILL.md` 就按其本身作为技能扫描；同时该目录还包含子技能时也会全部扫描出来（资源目录没有 `SKILL.md`，会被自动跳过）（by @JackLin513、@zhukunpenglinyutong）
+- **单个损坏技能不再清空 `$` Codex 技能列表**：`skills/list` 部分失败（某一个 `SKILL.md` 无法读取、frontmatter 非法、另一个 cwd 下的过期技能）会在报错的同时返回有效技能，而补全协调逻辑把任何错误都当成致命错误——发布空列表，清掉用户的自定义技能，并把原生目录标记为权威来源，导致后端扫描的列表在本次会话剩余时间内被忽略。现在会发布运行时实际返回的结果，真正读取失败时保留后端扫描的兜底列表直到拿到真实数据，警告仍会在「设置 > 技能」中显示（by @zhukunpenglinyutong）
+- **子智能体保留自己的权限模式**：`PreToolUse` 钩子对每次调用都读取父级缓存的模式，因此父级一切换模式，运行在原生自动审批下的子智能体就会被强制退回「询问」；子智能体调用 `EnterPlanMode` / `ExitPlanMode` 还会改动父级 Query 或弹出父级的计划审批框。现在子智能体调用（按 `agent_id` 识别，而不是同样会描述主线程的 `agent_type`）会优先采用钩子输入中合法的 `permission_mode`，子智能体的计划切换、计划文件归属以及 SDK 专属的 `dontAsk` / `bubble` 模式都交由原生权限流程处理，缺失或未知模式仍回退到父级策略（by @gadfly3173）
+- **粘贴的图片不再串到其他聊天标签页**：草稿原先存在 `localStorage`，同源的所有聊天标签页共用一份，导致某个 webview 的截图会被另一个恢复出来。现在草稿改用 `sessionStorage`——仍能跨输入框重建与页面重载存活，但绝不会跨 webview——旧的共享草稿会被有意留在原处（无法判断其归属），保存失败或超出大小上限时会清除旧草稿，使已删除的图片在重载后不会回来，刚恢复的草稿也不会被重写，避免存储写满时把恢复内容清掉（by @gadfly3173）
+- **任意字号缩放下下拉浮层都贴合所属行**：子菜单定位混用了被缩放过的 `getBoundingClientRect` 与布局像素的滚动尺寸，导致字号缩放超过 100% 时推理强度浮层偏离所在行并溢出小窗口。现在子菜单布局整体按布局像素计算，即使 `maxHeight` 裁剪了盒模型也能测量到内容的自然尺寸，主下拉宽度会被限制在视口内并与 CSS 最小宽度保持一致，已展开的菜单通过 `ResizeObserver` 跟随窗口尺寸和内容变化，而不是只在打开时测量一次（by @gadfly3173）
+
+---
+
+##### **2026年10月19日（v0.6.1）**
+
+English:
+
+🔧 Improvements
+- **Load chat tabs faster on Remote JCEF**: the webview no longer ships as a ~10 MB single-file HTML sent to every tab; hashed, gzipped assets are served from a stable origin and cached across chat tabs, and a visible fallback message replaces the blank page if the compressed bootstrap ever fails to load (by @Jefung)
+
+🐛 Fixes
+- **Stop subagents from silently falling back to built-in model names**: every model tier configured in settings.json (opus / sonnet / haiku / small-fast / subagent) now reaches the CLI environment, so a subagent declaring e.g. `model: opus` resolves to the configured third-party model instead of an unrecognized built-in name that endpoints silently reroute; tiers no longer present in the settings are cleared, so switching providers cannot leave stale model names behind (by @8p98h2fgnd-max)
+- **Keep Codex Full Auto and the effective sandbox in sync**: Full Auto now maps to danger-full-access on every platform; a wiped or pre-scope snapshot re-derives its access scope from the permission mode without ever overriding an explicit user choice; Settings > Permissions shows only the runtime-confirmed sandbox ("not confirmed yet" until the app-server echoes it) instead of presenting the requested value as effective (by @zhukunpenglinyutong)
+- **Refine the Claude plan usage indicator**: the compact summary no longer crams reset dates into one line; full per-window reset times (local time), the plan level and a stale-data warning move into a keyboard-accessible tooltip (Arrow/PageUp/PageDown/Home/End scroll, Escape closes) that follows the input box while it is dragged and always stays inside the viewport (by @GGMGG)
+
+中文：
+
+🔧 优化
+- **远程 JCEF 下聊天标签页加载更快**：webview 不再以约 10 MB 的单文件 HTML 逐标签页传输；带内容哈希的 gzip 资源通过固定域名供给并跨标签页缓存，压缩引导加载失败时显示明确的错误提示，不再白屏（by @Jefung）
+
+🐛 修复
+- **堵住子智能体静默回退到内置模型名**：settings.json 中配置的所有模型档位（opus / sonnet / haiku / small-fast / subagent）现在都会同步到 CLI 环境变量，子智能体声明 `model: opus` 等档位时可正确解析到配置的第三方模型，不再回退为端点无法识别而被静默改路由的内置模型名；设置中已删除的档位会被同步清除，避免切换供应商后残留旧模型名（by @8p98h2fgnd-max）
+- **Codex Full Auto 与实际生效沙箱保持同步**：Full Auto 在所有平台都映射为 danger-full-access；本地快照被清空或不含沙箱字段时，访问范围会跟随权限模式重新推导，且绝不覆盖用户显式做出的选择；「设置 > 权限」仅显示运行时确认的沙箱（确认前显示「尚未确认」），不再把请求值当作已生效值展示（by @zhukunpenglinyutong）
+- **优化 Claude 额度指示器**：紧凑摘要不再把重置日期挤在一行内；各窗口的完整重置时间（本地时间）、套餐等级与数据过期警示移至支持键盘操作的浮窗（方向键 / PageUp / PageDown / Home / End 滚动，Escape 关闭），浮窗跟随输入框拖拽移动并始终保持在可视区域内（by @GGMGG）
+
+---
+
+##### **2026年10月18日（v0.6.0）**
+
+English:
+
+✨ Features
+- **Upgrade Codex to a persistent native runtime**: conversations now use the Codex CLI's app-server, keeping the connection alive across turns and handling approvals and questions through native interactions. Codex installation and detection are now managed under Settings > Provider Management > CLI (by @gadfly3173, @GGMGG, @zhukunpenglinyutong)
+- **Plan and review with Codex inside the IDE**: native plans offer **Execute plan** and **Continue adjusting** actions; use `/compact` to compress context, `/review` to start a review, and `/approvals` to open permission settings (by @gadfly3173)
+- **Inspect Codex changes before approving them**: file approvals display the proposed diff; file-change cards support previews and undo, while `/diff` opens the current workspace's staged, unstaged and untracked changes without starting a model turn (by @gadfly3173, @jianhong-li)
+- **Answer Grok questions directly in the IDE**: `ask_user_question` requests now open an interactive question dialog, allowing the conversation to continue after you answer (by @toxeh)
+- **See OpenCode tool calls and thinking**: tool results and reasoning now appear in the conversation, the thinking toggle is passed to the CLI, and repeated event snapshots no longer duplicate text (by @57ggfk)
+- **Choose whether tool groups start collapsed**: separate settings control the default collapsed state of batch command and file-edit groups, with preferences retained across views (by @GGMGG)
+
+🔧 Improvements
+- **Bring Codex's native data into the plugin**: model and reasoning-effort choices, skills, MCP status and subagent activity now use native runtime data; tool output, images and context-compaction markers have more complete live and history displays (by @gadfly3173)
+- **Improve Claude compatibility with cc-switch**: aggregated and direct model routes resolve correctly, available reasoning-effort levels are preserved, and model capabilities stay isolated between providers (by @IcarusAegis)
+- **Detect more CLI installations reliably**: recognize standalone Codex installs and ZCode's bundled app-server, verify CLI versions, and try another detected Codex installation if the selected one fails to start (by @gadfly3173, @zhukunpenglinyutong)
+- **Keep history accurate after external changes**: Codex history caches detect rewritten files even when size and timestamps are unchanged; native message counts distinguish unknown counts from empty sessions, and unavailable native history can fall back to local records (by @gadfly3173, @GGMGG, @zhukunpenglinyutong)
+
+🐛 Fixes
+- **Prevent Codex sessions from getting stuck**: late callbacks from previous turns no longer clear a new turn's state; interrupted turns and failed send setup release their pending operations, and context compaction no longer hides an active reply's loading state (by @gadfly3173, @GGMGG, @jianhong-li, @zhukunpenglinyutong)
+- **Keep pasted images with the correct draft**: fix lost, duplicated or out-of-order attachments during asynchronous clipboard processing, prevent delayed paste results from entering another session, and retain early IDE pastes until the input is ready (by @gadfly3173, @zhukunpenglinyutong)
+- **Restore conversations and scroll position more reliably**: retire Claude and Codex session IDs whose source records were removed, preserve complete streamed replies during history reloads, and prevent layout changes or paginated reloads from jumping the message list (by @gadfly3173, @zhukunpenglinyutong)
+- **Accept the highlighted slash command with Enter**: pressing Enter while the completion menu is open selects its highlighted command instead of sending the unfinished text (by @toxeh)
+- **Fix Windows CLI startup failures**: Grok JavaScript entry points and `.cmd`/`.bat` launchers use the appropriate runtime, and service scripts installed through directory junctions no longer exit silently (by @toxeh, @zxc1213, @zhukunpenglinyutong)
+- **Handle permission and edit states correctly**: failed timeout responses no longer leave permission dialogs stuck, changing approval modes preserves the user's native Codex sandbox choice, and streaming updates keep edit previews open while denied edits count toward completed group progress (by @GGMGG, @zhukunpenglinyutong)
+- **Protect Codex CLI selection from request-level environment changes**: CLI discovery and startup use the daemon's original environment, preventing session-injected variables from redirecting execution to another binary (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- **Codex 升级为常驻原生运行时**：通过 Codex CLI 的 app-server 持续连接会话，跨回合复用连接，并通过原生交互处理审批与提问。Codex 的安装与识别入口统一调整至「设置 > 提供商管理 > CLI」（by @gadfly3173、@GGMGG、@zhukunpenglinyutong）
+- **在 IDE 内使用 Codex 计划与审查能力**：原生计划支持「执行计划」与「继续调整」；可通过 `/compact` 压缩上下文、`/review` 发起审查、`/approvals` 打开权限设置（by @gadfly3173）
+- **审批前查看 Codex 文件改动**：文件审批弹窗展示待批准的差异，文件变更卡片支持预览与撤销；`/diff` 可直接查看当前工作区已暂存、未暂存及未跟踪文件的变更，无需发起模型回合（by @gadfly3173、@jianhong-li）
+- **直接在 IDE 内回答 Grok 的问题**：`ask_user_question` 请求现在会打开可交互的问答弹窗，回答后即可继续对话（by @toxeh）
+- **OpenCode 展示工具调用与思考过程**：对话中可查看工具结果与思考内容，思考开关会传递给 CLI，重复事件快照不再造成正文重复（by @57ggfk）
+- **支持设置工具组默认折叠**：可分别设置批量命令组和文件编辑组是否默认折叠，切换视图后仍保留偏好（by @GGMGG）
+
+🔧 优化
+- **接入 Codex 原生数据**：模型与推理强度选项、技能、MCP 状态及子代理活动改用原生运行时数据；工具输出、图片和上下文压缩标记在实时对话与历史记录中的展示更加完整（by @gadfly3173）
+- **改善 Claude 与 cc-switch 的兼容性**：正确识别聚合与直连模型路由，保留可用的推理强度选项，并避免不同提供商之间的模型能力互相影响（by @IcarusAegis）
+- **提高 CLI 安装识别与启动可靠性**：支持识别独立安装的 Codex 和 ZCode 内置 app-server，校验 CLI 版本；选中的 Codex 无法启动时，自动尝试其他已检测到的安装（by @gadfly3173、@zhukunpenglinyutong）
+- **历史记录更准确地跟随外部变化**：即使文件大小与时间戳未变，Codex 历史缓存也能识别内容重写；原生消息统计区分「尚未统计」和空会话，原生历史不可用时可回退读取本地记录（by @gadfly3173、@GGMGG、@zhukunpenglinyutong）
+
+🐛 修复
+- **修复 Codex 会话卡住或状态错乱**：上一回合迟到的回调不再清除新回合状态；回合中断或发送准备失败时会释放待处理操作，上下文压缩结束也不会提前关闭正在回复的加载状态（by @gadfly3173、@GGMGG、@jianhong-li、@zhukunpenglinyutong）
+- **粘贴图片始终跟随正确的草稿**：修复异步剪贴板处理造成的附件丢失、重复与顺序错乱，避免迟到的图片进入其他会话；输入框尚未准备好时，保留提前触发的 IDE 图片粘贴（by @gadfly3173、@zhukunpenglinyutong）
+- **改善会话恢复与滚动位置保持**：清除源记录已被删除的 Claude、Codex 会话 ID；重载历史时保留完整的流式回复，避免布局变化或分页重载造成消息列表跳动（by @gadfly3173、@zhukunpenglinyutong）
+- **回车正确选中高亮的斜杠命令**：补全菜单打开时，按 Enter 会选中高亮命令，不再直接发送尚未输入完整的文本（by @toxeh）
+- **修复 Windows 下的 CLI 启动失败**：Grok 的 JavaScript 入口与 `.cmd`/`.bat` 启动脚本改用对应运行方式；通过目录联接安装的服务脚本不再静默退出（by @toxeh、@zxc1213、@zhukunpenglinyutong）
+- **修复权限弹窗与编辑组状态异常**：超时决定发送失败不再卡住权限弹窗，切换审批模式时保留用户原生 Codex 沙箱配置；流式更新不再关闭已展开的编辑预览，被拒绝的编辑也会计入工具组完成进度（by @GGMGG、@zhukunpenglinyutong）
+- **防止请求级环境变量干扰 Codex CLI 选择**：CLI 查找与启动统一使用守护进程的原始环境，避免会话注入的变量将执行路径指向其他程序（by @zhukunpenglinyutong）
+
+---
+
+##### **2026年9月30日（v0.5.9）**
+
+English:
+
+✨ Features
+- **Search the model dropdown with multiple terms, navigate it from the keyboard and clear the query**: whitespace-separated tokens are AND-matched against the model id, label and description, so `son 4` finds Sonnet 4.6; `ArrowUp`/`ArrowDown` walk the rendered rows with wrap-around, `Enter` picks the highlighted row and `Esc` clears the query first and only closes the menu on a second press, while IME composition keys are never hijacked; searching pre-highlights the first hit, scrolls rows into view, a clear (`x`) button in the search row keeps the dropdown open, and the empty state echoes the query (by @57ggfk)
+- **Copy a link's address from the message list and see where a link actually points**: right-clicking a link opens the context menu with "Copy Link Address" even when no text is selected — Quote/Copy appear only for a real selection, and the link action comes first, matching browser convention — while Markdown URL links whose visible text hides their target (`data-linkify="url"`) now reveal the raw `href` in the hover tooltip, resolved synchronously without a backend round-trip; file links keep their async resolution path, and a single link-type predicate is shared by mouseover/mousemove/mouseout so they always agree on which anchors own the tooltip (by @gadfly3173)
+- **Add Claude Sonnet 5.5 and GPT-6.1 Sol**: both models are selectable in the dropdown with localized labels and descriptions in all 10 locales, and are wired into the effort and max-effort sets; their context limits (200k / 1M for Sonnet 5.5, 1.05M for GPT-6.1 Sol) and pricing entries are registered ahead of the shorter `claude-sonnet-5` / `gpt-6` prefixes, so dated snapshots such as `claude-sonnet-5-5-2026-04-01` and `gpt-6.1-sol-2026-04-01` resolve to the intended rates instead of a stale alias (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- **Stop Codex turns from overlapping and queued messages from resending after an interrupt**: Codex holds a persistent per-thread writer lock for the whole turn, so a second `codex exec resume` started while the previous process was still alive failed with "thread-store conflict: already has an active writer", which the UI misdiagnosed as an expired session thread and answered with "create a new session"; sends are now serialized per channel and a still-alive previous turn is stopped before the next one spawns, the message queue dispatches at most one item per idle period, and a freshly dispatched turn's loading state survives the just-interrupted turn's late `showLoading(false)` / `onStreamEnd` echoes (an 8-second immunity window, released by the turn's real stream start or by an error snapshot) so the drain cannot re-fire mid-boot; "already has an active writer" also gets its own diagnostic with retry guidance in 10 locales instead of the wrong advice (by @57ggfk)
+- **Translate the input box's right-click menu in every locale**: `contextMenu.cut` / `paste` / `newline` existed in no locale including `en`, so Cut / Paste / Insert Newline always fell back to hardcoded English and produced a mixed-language menu in non-English UIs; the three keys are now present in all 10 webview locales, ordered cut → copy → paste → newline → quote (by @57ggfk)
+
+中文：
+
+✨ 新功能
+- **模型下拉支持多词搜索、键盘操作与一键清空**：以空格分隔的多个关键词按「且」的关系同时匹配模型 ID、名称与描述，因此输入 `son 4` 能找到 Sonnet 4.6；`ArrowUp`/`ArrowDown` 在可见行之间循环移动高亮，`Enter` 选中高亮行，`Esc` 先清空搜索词、再按一次才关闭菜单，且不会劫持输入法候选键；搜索时会预高亮首个命中项并把行滚动到可视区，搜索行新增清除（`x`）按钮（保持菜单展开），空结果状态会回显用户输入的搜索词（by @57ggfk）
+- **消息列表里可右键复制链接地址，并能看到链接的真实指向**：即使没有选中任何文本，右键点击链接也会弹出包含「复制链接地址」的菜单——引用/复制仅在确有选中文本时出现，且链接操作排在前面（符合浏览器习惯）；Markdown 中「显示文字掩盖了真实地址」的链接（`data-linkify="url"`）现在会在悬停浮层里显示原始 `href`（同步解析，无需请求后端），文件链接仍走异步解析路径；链接类型判断被抽成单一判定函数，保证 mouseover/mousemove/mouseout 对「哪个链接该显示浮层」的认知一致（by @gadfly3173）
+- **新增 Claude Sonnet 5.5 与 GPT-6.1 Sol**：两款模型可在下拉中选择，10 个语言包都补上了本地化的名称与描述，并接入了推理强度与最高强度集合；上下文上限（Sonnet 5.5 为 200k / 1M，GPT-6.1 Sol 为 1.05M）与价格表也在更短的 `claude-sonnet-5` / `gpt-6` 前缀之前注册，使 `claude-sonnet-5-5-2026-04-01`、`gpt-6.1-sol-2026-04-01` 这类带日期的快照按预期计费，而不会命中旧的别名（by @zhukunpenglinyutong）
+
+🐛 修复
+- **Codex 不再出现回合重叠、中断后排队消息被重复发送**：Codex 在整个回合期间持有「按线程持久化的写锁」，因此在上一个进程仍存活时再启动一次 `codex exec resume`，会以 "thread-store conflict: already has an active writer" 失败，而界面把它误判为「会话线程已过期」并建议「新建会话」；现在按 channel 串行化发送、在下一回合启动前先停掉仍存活的上一回合进程，消息队列每个空闲期最多派发一条，并且新派发回合的 loading 状态不会再被上一回合迟到的 `showLoading(false)` / `onStreamEnd` 回声重置（8 秒免疫窗口，回合真正开始流式输出或收到错误快照时解除），从而不会在启动过程中再次触发排队派发；"already has an active writer" 也拥有了独立诊断（含重试指引，覆盖 10 个语言包），不再给出错误建议（by @57ggfk）
+- **输入框右键菜单在所有语言下完成翻译**：`contextMenu.cut` / `paste` / `newline` 在所有语言包（包括 `en`）中都不存在，导致剪切/粘贴/插入换行始终回落到硬编码英文，非英文界面出现中英混排菜单；现已在 10 个 webview 语言包中全部补齐（顺序为 cut → copy → paste → newline → quote）（by @57ggfk）
+
+---
+
+##### **2026年9月28日（v0.5.8）**
+
+English:
+
+✨ Features
+- **Add `xhigh` reasoning effort to the Grok CLI**: the reasoning selector offers low/medium/high/xhigh for Grok, and the level is now applied to the live ACP session through the typed `session/set_config_option` option before every prompt — the persisted value is read back and verified — instead of setting the `GROK_REASONING_EFFORT` process variable, which the CLI's session leader ignores for resumed and warm sessions (by @D-Jancy, @zhukunpenglinyutong)
+
+🔧 Improvements
+- **Stop text streaming from redoing the whole transcript's work**, the largest part of this release: tool results are now looked up in one session-scoped map backed by a weak-reference cache over raw messages, so a delta appended to the last message no longer invalidates historical tool consumers or re-renders history (`MessageList` caches each message's tool-result signature, taking history signature extraction from 31 per burst to 1); a text-only burst no longer rebuilds the file-changes ledger or touches storage (30 text updates: ledger rebuilds 30→0, storage reads 90→0, writes 30→0); the Java side coalesces full-message materialization on a ~33 ms window without delaying delta notifications; and the transport snapshot is captured once inside the message lock and reused, copying only messages whose content actually changed (200 messages plus 30 results: captured copies 6,665→230) (by @zhukunpenglinyutong)
+- **Ship only the divergent tail of the transcript**: incremental delivery is no longer gated on conversation length (the old 300-message threshold and 64-message tail are gone) — the coalescer finds the first index where the new snapshot diverges from the delivered one and pushes the suffix from that point, so a 50-message session with a 300k-character transcript pushes a few KB per update instead of the full transcript; payloads over 200k characters coalesce harder, and each snapshot is built once inside the lock (by @zhukunpenglinyutong)
+- **Cache Codex history pages in a bounded, file-backed turn index**: a 1,000-turn session parses its source records once instead of per page (three pages: parsed source records 6,000→2,000, bytes fed to the parser 623,340→207,780), tool calls and results stay linked across pages and appends, and the existing `totalTurns`/`fromTurn`/`toTurn`/cursor semantics are unchanged; over budget (200,000 offsets / 64 MiB per session, two sessions per injector) it falls back to the previous streaming full scan, and stale or superseded loads never publish (by @zhukunpenglinyutong)
+- **Read Codex transcripts incrementally during tool replay**: byte offsets, UTF-8 decoder carry-over and half-line handling stop an unchanged transcript from being re-read in full (30 non-growing updates: body bytes read 2,107,650→0), while same-inode rewrites and truncated tails are still detected and rebuilt (by @zhukunpenglinyutong)
+- **Coalesce streaming code highlighting**: an unclosed fence highlights at most every 150 ms and refreshes immediately when the fence closes or the stream ends, so a growing long block no longer highlights on every token (300-line code plus 30 increments: highlight calls 31→2); the final content and clipboard copies always read the latest code and never wait for that window (by @zhukunpenglinyutong)
+- **Stop serializing long drafts just to validate the input cache**: a `MutationObserver` version replaces the `innerHTML` snapshot, so reading a ~100k-character draft performs no HTML serialization at all (120→0) and each content version is extracted once — equal-length replacements, file tags, newlines and selection are all preserved (by @zhukunpenglinyutong)
+- **Virtualize the Read tool group**: only the visible rows plus overscan exist in the DOM (a 1,000-row group mounts ~9 rows), with fixed 28px rows, keyboard focus that can move beyond the window, bottom-follow that does not jump on middle appends, and scroll position restored on collapse/expand (by @zhukunpenglinyutong)
+- **Replace the settings' native `<select>` with a shared in-page listbox** (`ListboxSelect`): the native popup is a separate CEF window that JCEF fails to create on the first browser instance after a fresh install (the first click is swallowed until an IDE restart) and any CSS zoom on an ancestor dismisses it; the DOM listbox keeps options inside the page, measures before paint so the menu never flashes on the wrong side, and keeps its `aria` roles, `Escape`-to-close-and-refocus behavior and external `<label htmlFor>` wiring — adopted by the language, font size, UI font, code font and diff theme controls (by @zhukunpenglinyutong)
+- **Skip the MCP bootstrap when generating a commit message**: the Agent SDK fallback now uses `strictMcpConfig` and passes no MCP servers, so booting the user's configured MCP servers no longer precedes the first streamed token (measured ~12s → ~0.5s on a typical config) (by @zhukunpenglinyutong)
+- **Quiet the logs on hot paths**: config reads that ran many times per second are now `debug`; the invalid-skill-name warning is emitted once per file instead of on every scan (44 lines in a single second were observed); and the commit-message child process' stdout is logged at `debug` and truncated to 200 characters, so streamed chunks and the generated message no longer flood and duplicate into `idea.log` (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- **Restore image paste on macOS 27**, where Cmd+V is swallowed before reaching CEF while the JCEF webview (OSR) has focus: a CEF keyboard hook detects the orphaned Cmd+V `KEYUP` and forwards the clipboard image, an AWT-level fallback covers IDE-level paths, non-`BufferedImage` clipboard payloads (`MultiResolutionCachedImage`) are converted instead of throwing `ClassCastException`, and the same image delivered by both the DOM paste and a Java producer is attached only once (1-second replay window plus byte comparison) (by @gumupaier, @zhukunpenglinyutong)
+- **Send user-defined Claude model ids verbatim**: `claude-opus-4-6` is still served by the API but sat in the retired-model migration table, so a custom model with that id was silently rewritten to `claude-opus-5` and the dropdown checked both rows at once; the id is out of the table, custom models are tagged `isCustom` and are never alias-migrated on selection, restore or backend callbacks (`normalizeClaudeModelId` now takes the custom id set, Java gained `setModelVerbatim`), and a custom entry whose id really is retired is labelled with a "Retired" badge explaining that it is still forwarded as-is (by @changshunxu520, @zhukunpenglinyutong)
+- **Pass the exact model id to the Claude SDK instead of the family alias**: `mapModelIdToSdkName` returned aliases like `opus`, which can only resolve through `ANTHROPIC_DEFAULT_OPUS_MODEL` — a variable the webview-controlled settings override deliberately blanks — so requests silently fell back to the CLI's default Opus; the new `resolveSdkModelName` prefers the resolved exact id (including provider mappings such as `MiniMax-M2.5`) and is used by messages, attachments, persistent queries, commit messages and the prompt enhancer (by @changshunxu520, @zhukunpenglinyutong)
+- **Resume the exact pi session**: multi-turn pi conversations now pass `--session <id>` — newer builds reject `--session-id` with "Unknown option", while `--continue` binds to the cwd's most recent session, i.e. the wrong conversation whenever several share a project (by @Cyber0xFE, @zhukunpenglinyutong)
+- **Let CLI providers send while the Claude/Codex SDK check is still running**: the input box and the sender only wait on that query when the provider is not installed, the "Checking SDK status…" bar hides for an installed CLI, and Enter now calls the latest submit handler (the committed `useEffectEvent` kept the first one, which still saw a loading status and toasted instead of sending) (by @toxeh)
+- **Keep `@`-addresses intact when linkifying file references**: an `@` glued to a word character belongs to `git@host:repo.git` or `user@example.com` and is no longer collapsed into its last path segment (by @Cyber0xFE)
+- **Do not cap a Codex request at 2 hours**: only ten minutes without any output counts as a hang, so long refactors, full test suites and long agent chains are no longer killed mid-work (by @zhukunpenglinyutong)
+- **Keep the centered provider menu centered while it enters**: the shared dropdown keyframes drop the trigger's inline `translateX(-50%)`, so the centered menu jumped half a width sideways when the animation ended; a dedicated centered keyframe (disabled under reduced motion) fixes it (by @zhukunpenglinyutong)
+
+中文：
+
+✨ 新功能
+- **Grok CLI 新增 `xhigh` 推理强度**：Grok 的推理强度选择器现在提供 low/medium/high/xhigh，并且强度改为在每次提问前通过 ACP 的 `session/set_config_option` 应用到活动会话（写入后回读并校验实际值），不再设置 `GROK_REASONING_EFFORT` 进程变量——该变量对续接和复用中的会话不起作用（by @D-Jancy、@zhukunpenglinyutong）
+
+🔧 优化
+- **文字流式输出不再触发整段对话的重复计算**（本次发布最主要的改动）：工具结果改由「会话级映射 + raw 消息弱引用缓存」统一查找，追加到末条消息的增量不再让历史工具消费方失效、也不再重渲染历史（`MessageList` 为每条消息缓存工具结果签名，历史签名提取由 31 次/批降为 1 次）；纯文字更新不再重建文件变更账本、也不再读写存储（30 次文字更新：账本重建 30→0，存储读 90→0、写 30→0）；Java 侧把「全文物化」按约 33ms 合并但不推迟增量通知；传输快照在消息锁内捕获一次并复用，只复制内容确实变化的消息（200 条消息 + 30 个结果：复制捕获 6,665→230）（by @zhukunpenglinyutong）
+- **只下发「发生分歧的尾部」**：增量下发不再由对话长度决定（旧的 300 条消息阈值与 64 条尾部传输已移除）——合并器找到新快照与已投递快照的第一个分歧下标，并从该处开始下发后缀，因此 50 条消息、30 万字符的会话每次只推送几 KB 而不是整段对话；超过 20 万字符的负载进一步加大合并间隔，每个快照在锁内只构建一次（by @zhukunpenglinyutong）
+- **Codex 历史分页改用有界、临时文件支撑的轮次索引并缓存**：1,000 个回合的会话只需解析一次源记录，而不是每页重扫（取三页：源记录解析 6,000→2,000，送入解析器的字节 623,340→207,780）；工具调用与结果能跨页、跨追加保持关联，`totalTurns`/`fromTurn`/`toTurn`/游标语义保持不变；超出预算（每会话 200,000 条偏移 / 64 MiB，每个 injector 两个会话）时回退到原有流式全扫描；过期或已被取代的加载不会发布结果（by @zhukunpenglinyutong）
+- **工具回放时增量读取 Codex 会话记录**：通过字节偏移、UTF-8 解码残留与半行处理，未增长的会话不再被反复全文读取（30 次未增长更新：正文读取 2,107,650→0 字节），同时仍能识别同 inode 重写与截断尾部并重建（by @zhukunpenglinyutong）
+- **合并流式代码高亮**：未闭合的代码围栏最多每 150ms 高亮一次，围栏闭合或流结束时立即刷新，长代码块不再每来一个 token 就高亮一次（300 行初始代码 + 30 次增量：高亮调用 31→2）；最终内容与复制始终读取最新代码，不受该窗口影响（by @zhukunpenglinyutong）
+- **不再为了校验输入缓存而序列化长草稿**：用 `MutationObserver` 版本号替代 `innerHTML` 快照，读取约 10 万字符草稿不再产生任何 HTML 序列化（120→0），每个内容版本只提取一次，并保留等长替换、文件标签、换行与选区行为（by @zhukunpenglinyutong）
+- **Read 工具组改为虚拟滚动**：只有可视行与 overscan 会挂载到 DOM（1,000 条只挂载约 9 条），行高固定 28px，键盘焦点可跨窗口移动，中部追加不会跳动，折叠/展开后恢复滚动位置（by @zhukunpenglinyutong）
+- **设置页的原生 `<select>` 换成共享的页内列表（`ListboxSelect`）**：原生下拉弹层是独立的 CEF 窗口，全新安装后第一个浏览器实例上 JCEF 无法创建（首次点击被吞掉，必须重启 IDE 才能恢复），且祖先节点上的 CSS zoom 会把它关掉；DOM 列表把选项留在页面内，绘制前先测量以避免菜单闪在错误的一侧，并保留 `aria` 角色、`Escape` 关闭并回焦、外部 `<label htmlFor>` 关联等行为——语言、字号、界面字体、代码字体、Diff 主题控件均已切换（by @zhukunpenglinyutong）
+- **生成提交信息时跳过 MCP 启动**：Agent SDK 兜底路径改为 `strictMcpConfig` 且不传入任何 MCP server，用户配置的 MCP server 不再抢在第一个流式 token 之前启动（典型配置实测约 12s → 约 0.5s）（by @zhukunpenglinyutong）
+- **降低热点路径的日志噪音**：每秒被读取多次的配置读取降为 `debug`；技能名校验失败的告警改为「每个文件只报一次」（实测曾在一秒内刷出 44 行）；提交信息子进程的 stdout 改为 `debug` 并截断到 200 字符，流式分片与生成结果不再刷屏、也不再重复写进 `idea.log`（by @zhukunpenglinyutong）
+
+🐛 修复
+- **修复 macOS 27 上图片粘贴失效**：当 JCEF webview（OSR）获得焦点时，Cmd+V 会在到达 CEF 之前被系统吞掉，只留下一个孤立的 `KEYUP`；新增的 CEF 键盘钩子据此识别并转发剪贴板图片，AWT 层兜底覆盖 IDE 级路径，非 `BufferedImage` 的剪贴板数据（`MultiResolutionCachedImage`）会被转换而不是抛 `ClassCastException`，同一张图片同时被 DOM 粘贴与 Java 生产者投递时只作为附件加入一次（1 秒重放窗口 + 字节比较）（by @gumupaier、@zhukunpenglinyutong）
+- **用户自定义的 Claude 模型 ID 一律原样发送**：`claude-opus-4-6` 官方 API 仍在提供服务，却被放进了「已下线模型迁移表」，导致使用该 ID 的自定义模型被静默改写成 `claude-opus-5`、下拉列表里同时勾选两行；现在该 ID 已从迁移表移除，自定义模型会带上 `isCustom` 标记，在选择、恢复与后端回调路径上都不再被别名迁移（`normalizeClaudeModelId` 接收自定义 ID 集合，Java 侧新增 `setModelVerbatim`）；若自定义 ID 确实已下线，会在下拉项上显示「已下线」标签并说明仍会原样发送（by @changshunxu520、@zhukunpenglinyutong）
+- **向 Claude SDK 传递精确模型 ID 而不是族别名**：`mapModelIdToSdkName` 会返回如 `opus` 的别名，而该别名只能通过 `ANTHROPIC_DEFAULT_OPUS_MODEL` 解析——而 webview 托管的设置覆盖会刻意清空这个变量——于是请求会静默回落到 CLI 的默认 Opus；新增的 `resolveSdkModelName` 优先使用解析后的精确 ID（包括 `MiniMax-M2.5` 这类 Provider 映射），消息、附件、常驻查询、提交信息与提示词增强均已接入（by @changshunxu520、@zhukunpenglinyutong）
+- **恢复精确的 pi 会话**：多轮 pi 对话改为传 `--session <id>`——较新的构建会以 "Unknown option" 拒绝 `--session-id`，而 `--continue` 只会绑定到当前目录下最近的会话，同一项目里有多个对话时会接错（by @Cyber0xFE、@zhukunpenglinyutong）
+- **CLI Provider 不再等待 Claude/Codex SDK 检查**：输入框与发送流程只在 Provider 未安装时才等待 SDK 查询，「正在检查 SDK 状态…」状态条对已安装的 CLI 不再显示，Enter 也改为调用最新的提交处理器（此前提交过的 `useEffectEvent` 会保留首个处理器，它看到的仍是加载中状态，于是只弹 toast 不发送）（by @toxeh）
+- **链接化文件引用时不再破坏 `@` 地址**：紧跟在单词字符后的 `@` 属于 `git@host:repo.git` 或 `user@example.com` 的一部分，不再被折叠成最后一段路径（by @Cyber0xFE）
+- **Codex 请求不再有 2 小时总时长上限**：只有连续 10 分钟无任何输出才算卡死，长时间重构、完整测试套件与长代理链不会在中途被中断（by @zhukunpenglinyutong）
+- **居中显示的 Provider 菜单在入场动画期间不再偏移**：共享的下拉动画关键帧会丢掉触发器上的内联 `translateX(-50%)`，导致居中的菜单在动画结束时横向跳半个宽度；新增专用居中关键帧（并在「减少动态效果」下禁用动画）修复（by @zhukunpenglinyutong）
+
+---
+
+##### **2026年9月23日（v0.5.7）**
+
+English:
+
+✨ Features
+- Add **turn-based pagination for Claude session history**: restoring a session loads the latest 30 turns and "show earlier messages" pulls older pages on scroll-to-top, just like Codex — the bridge groups the transcript into turns with `fromTurn`/`toTurn`/`hasMore`/`cursorReset` metadata, Java pages it under the session lock, and a failed page falls back to the legacy full load so a broken cursor never leaves an empty chat (by @hebulin, @zhukunpenglinyutong)
+- **Reorder queued messages by dragging**: every queue row gets a gripper handle (pointer drag, plus a focusable `role=button` with ArrowUp/ArrowDown for keyboard users), an insert line shows where a message will land between rows, and the list auto-scrolls when the pointer nears its top or bottom edge (by @57ggfk, @zhukunpenglinyutong)
+- Update the model lineup: add **Claude Opus 5.5** (200K / 1M context, $4/$20, reasoning-effort support), add **GPT-6 Sol** ($2/$10) and **GPT-6 Luna** ($0.1/$0.5) with 1.05M context, and drop the retired **GPT-5.4** (by @zhukunpenglinyutong)
+
+🔧 Improvements
+- Make **Git4Idea an optional dependency**: the Commit AI action now lives in a `git-features.xml` loaded only when the bundled Git plugin is present, so CC GUI installs cleanly in Git-less IDE configurations (the Commit AI button simply does not appear) (by @zhukunpenglinyutong, @gadfly3173)
+- **Align chat font sizes with the IDE and default to 100%**: IDE-reported sizes are converted to logical points via `UISettings.getDefFontScale()` so HiDPI displays no longer render chat text larger than the editor, and the level table, valid range and default are consolidated into `utils/fontScale.ts` (the level is now persisted only on an explicit pick) (by @gadfly3173)
+- **Serialize streaming and history loads on the shared transcript**: every message-list reader and writer takes a `SessionState.messageStateLock`, history loads carry an ownership token so a superseded load can neither apply a stale result nor strand the loading flag, transport snapshots are captured under the lock, and the webview event queue is gated on frontend readiness with bounded retries (by @gadfly3173, @zhukunpenglinyutong)
+- Continue the **webview React-health cleanup**: extract `nodeProcessDropdownLayout`, `providerNotConfigured`, `convertAtFileRefsToLinks` and `sampleAnchorItems` into dedicated modules, split the token-tracker dashboard contexts/utilities into their own files so Fast Refresh keeps state, and replace render-time ref mutations with render-scoped values or effect events (by @zhukunpenglinyutong)
+
+🐛 Fixes
+- Make **DSH questions answerable end to end**: answers echo the caller-declared question `id` with free text in `custom` (instead of forwarding question text as ids or folding the note into the option labels), a question/approval waterfall raised by another session on the host-wide `$events` stream no longer pops this window's dialog or steals the reply, a plan-review question renders its markdown plan under a "计划内容" label, the dialog title follows the asking provider, and an answer is posted with the live event client id after waiting for it (by @hesixian, @zhukunpenglinyutong)
+- Fix **DSH sessions landing outside every Project Workspace**: sessions are now created with an explicit `workspaceId` on both wire dialects and resumed threads are re-bound to their workspace, with `realpath`-canonicalized path matching so symlinked project directories stay visible in history (by @hesixian, @zhukunpenglinyutong)
+- Support **MiniMax Code (mcode) ≥ 0.4 stream-json**: parse the `schemaVersion 1` envelope (`item.started/updated/completed`, `turn.completed` usage, `turn.failed`, `exec.completed` errors) alongside the 0.2.x flat events, so a 0.4.x run streams content, thinking, tools and usage instead of ending with no response at all (by @whyz23901, @zhukunpenglinyutong)
+- Clear **stale Claude session IDs** whose transcript was pruned or is missing: the bridge reports a missing session file separately from an empty history, Java throws `SessionHistoryNotFoundException` and drops the saved id so the next send starts fresh, and persisted tab state records its owning project so a restore can no longer revive another project's session (by @gadfly3173, @zhukunpenglinyutong)
+- Follow **symlinked project paths** through Claude and Codex history storage while keeping legacy history locations readable, and preserve **empty Claude page cursors** as the latest-page sentinel so reloading a session no longer returns an empty first page (by @gadfly3173)
+- Show the **CLI's own session title** on paginated Claude history loads (`customTitle > aiTitle > summary > lastPrompt > firstPrompt`) instead of falling back to a mid-conversation prompt (by @gadfly3173)
+- Keep the **chat input state while a past session loads**: pending drafts and in-flight IME commits survive chat view transitions, while Enter, completion, provider menu and dialog interactions stay stable (by @gadfly3173)
+- Render **streaming deltas on a 16 ms timer instead of `requestAnimationFrame`**: deprioritized JCEF paint states defer rAF callbacks indefinitely, so deltas piled up unrendered until a structural snapshot forced a paint (by @gadfly3173)
+- Unify **Codex command and skill completions** in the chat input, and make the **dollar-command channel fail fast** once its loading timeout fires instead of re-waiting 30 seconds on every keystroke (by @gadfly3173, @zhukunpenglinyutong)
+- Harden the **commit-message generator**: retry once through a non-streaming `messages.create()` when a stream returns empty text (DeepSeek's Anthropic-compatible endpoint), reusing the shared ask-request shape with thinking disabled so a reasoning model cannot spend the whole budget on thinking, and Git-less IDEs now stay on the content-diff fallback instead of failing (by @hyczq, @gadfly3173, @zhukunpenglinyutong)
+- Fix the **pi provider on Windows and with version managers**: fall back to stderr when the `pi.cmd` shim writes its whole model table there (the model list no longer shows only "PI Auto"), and lead `PATH` with the resolved binary's own directory without reversing the newest-first version-manager order, so a stale node can no longer shadow a newer one (by @Cyber0xFE, @zhukunpenglinyutong)
+- Coordinate the **ai-bridge daemon's idle exit with Java**, so a normal idle shutdown is no longer misreported as a crash and concurrent requests during shutdown are handled (by @zty-f)
+- Treat a **torn JSONL transcript tail as an incomplete history** instead of a silently empty one (with a 10s grace before serving the parseable prefix), count only history-reproducible rows in the staleness guard, log stale `AskUserQuestion` responses instead of dropping them silently, and stop the boot model-sync retry from outliving the webview page (by @zhukunpenglinyutong, @hesixian)
+
+中文：
+
+✨ 新功能
+- 新增 **Claude 会话历史按回合分页**：恢复会话时先加载最近 30 个回合，向上滚动时通过「显示更早消息」按需加载更早的分页——与 Codex 一致；Node 桥接把消息按回合分组并返回 `fromTurn`/`toTurn`/`hasMore`/`cursorReset` 元数据，Java 在会话锁保护下分页，分页失败时回退到旧的整段加载，游标损坏也不会让用户看到空白对话（by @hebulin、@zhukunpenglinyutong）
+- **排队消息支持拖拽排序**：每条队列消息新增抓手手柄（支持指针拖拽，也可聚焦为 `role=button` 用上下方向键重排），列表之间会显示插入指示线，指针靠近列表上/下边缘时队列自动滚动（by @57ggfk、@zhukunpenglinyutong）
+- 更新模型清单：新增 **Claude Opus 5.5**（200K / 1M 上下文，$4/$20，支持推理强度），新增 **GPT-6 Sol**（$2/$10）与 **GPT-6 Luna**（$0.1/$0.5，1.05M 上下文），并移除已下线的 **GPT-5.4**（by @zhukunpenglinyutong）
+
+🔧 优化
+- **Git4Idea 改为可选依赖**：Commit AI 动作移入仅在存在内置 Git 插件时才加载的 `git-features.xml`，因此在没有 Git 插件的 IDE 中也能正常安装（只是不再显示 Commit AI 按钮）（by @zhukunpenglinyutong、@gadfly3173）
+- **聊天字号与 IDE 对齐并默认 100%**：通过 `UISettings.getDefFontScale()` 把 IDE 上报的字号统一换算为逻辑点，HiDPI 屏幕下聊天字体不再比编辑器偏大；字号档位表、有效范围与默认值统一收敛到 `utils/fontScale.ts`（且仅在用户显式选择时才持久化档位）（by @gadfly3173）
+- **流式输出与历史加载共享同一份对话记录时改为串行**：所有消息列表读写方都持有 `SessionState.messageStateLock`，历史加载携带归属令牌，被取代的加载既不会写入过期结果也不会让 loading 状态卡住；传输快照在锁内捕获；webview 事件队列以前端就绪为门槛并带有限次重试（by @gadfly3173、@zhukunpenglinyutong）
+- 继续 **webview React 健康度清理**：抽出 `nodeProcessDropdownLayout`、`providerNotConfigured`、`convertAtFileRefsToLinks`、`sampleAnchorItems` 等独立模块，把 token-tracker 仪表盘的 context 与工具函数拆分到独立文件以让 Fast Refresh 正确保留状态，并把渲染期修改 ref 的行为改为渲染作用域取值或 effect 事件（by @zhukunpenglinyutong）
+
+🐛 修复
+- **DSH 提问现在可以端到端作答**：回答按调用方声明的 `question.id` 回填、自由文本放入 `custom`（不再把问题文本当作 id，也不再把手填内容折进选项标签）；主机级 `$events` 流上属于其他会话的提问/批准瀑布不再弹出本窗口对话框、也不会抢走回复；计划审查类提问会以「计划内容」标签渲染 markdown 计划；对话框标题跟随提问方 Provider；作答会先等待并携带实时的事件 clientId（by @hesixian、@zhukunpenglinyutong）
+- 修复 **DSH 会话落在所有 Project Workspace 之外** 的问题：两种线协议下都显式携带 `workspaceId` 创建会话，续接的线程会重新绑定到所属 Workspace，并用 `realpath` 归一化路径比较，符号链接项目目录下的会话不再从历史列表消失（by @hesixian、@zhukunpenglinyutong）
+- 支持 **MiniMax Code（mcode）≥ 0.4 的 stream-json 协议**：在解析 0.2.x 扁平事件的同时解析 `schemaVersion 1` 信封（`item.started/updated/completed`、`turn.completed` 用量、`turn.failed`、`exec.completed` 错误），0.4.x 运行不再出现「提交后毫无响应」，而是正常流式输出正文、思考、工具与用量（by @whyz23901、@zhukunpenglinyutong）
+- 修复 **Claude 会话记录被清理或丢失后仍沿用过期 session ID**：桥接会把「会话文件缺失」与「空历史」区分上报，Java 抛出 `SessionHistoryNotFoundException` 并清除已保存的 id，让下一次发送重新开会话；持久化的标签页状态会记录所属项目，避免恢复时唤起别的项目的会话（by @gadfly3173、@zhukunpenglinyutong）
+- Claude 与 Codex 历史存储统一**跟随符号链接项目路径**，同时保留旧位置历史可读；并保留**空的 Claude 分页游标**作为「最新一页」哨兵值，重新加载会话不再返回空的第一页（by @gadfly3173）
+- 分页加载 Claude 历史时展示 **CLI 自己的会话标题**（`customTitle > aiTitle > summary > lastPrompt > firstPrompt`），不再退化为对话中段的提示词（by @gadfly3173）
+- 修复 **加载历史会话时聊天输入状态丢失**：草稿与正在输入的输入法组合内容可跨视图切换保留，同时 Enter、补全、Provider 菜单与对话框交互保持稳定（by @gadfly3173）
+- **流式增量改用 16ms 定时器渲染，不再依赖 `requestAnimationFrame`**：JCEF 降优先级绘制状态下 rAF 回调会被无限推迟，导致增量一直堆积，直到结构化快照强制重绘才显示（by @gadfly3173）
+- 统一聊天输入框的 **Codex 命令与技能补全**；**美元命令通道**在加载超时后立即失败，不再每次按键都重新等待 30 秒（by @gadfly3173、@zhukunpenglinyutong）
+- 加固 **提交信息生成**：流式返回空文本时（DeepSeek 的 Anthropic 兼容端点）改用非流式 `messages.create()` 重试一次，并复用共享的 ask 请求形态、关闭 thinking，避免推理模型把预算全部花在思考上；没有 Git 插件的 IDE 继续走内容兜底而非直接失败（by @hyczq、@gadfly3173、@zhukunpenglinyutong）
+- 修复 **pi Provider 在 Windows 与版本管理器下的问题**：`pi.cmd` 把模型表全写到 stderr 时回退读取 stderr（模型列表不再只剩「PI Auto」）；PATH 前置时以「已解析二进制自身目录」打头且不颠倒版本管理器的最新优先顺序，旧版 node 不再遮蔽新版本（by @Cyber0xFE、@zhukunpenglinyutong）
+- **ai-bridge daemon 的空闲退出与 Java 侧协同**：正常空闲退出不再被误判为崩溃，退出过程中的并发请求也能正确处理（by @zty-f）
+- 把 **JSONL 尾部截断视为历史不完整**而非静默的空历史（撕裂尾部超过 10 秒宽限期后先返回可解析前缀）；过期守卫只统计可被历史复现的行；过期的 `AskUserQuestion` 响应改为记录日志而非静默丢弃；启动时的模型同步重试不再在 webview 页面销毁后继续执行（by @zhukunpenglinyutong、@hesixian）
+
+---
+
 ##### **2026年9月15日（v0.5.6）**
 
 English:

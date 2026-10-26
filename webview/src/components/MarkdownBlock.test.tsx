@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import hljs from 'highlight.js/lib/core';
 import MarkdownBlock from './MarkdownBlock';
 import {
   resetLinkifyCapabilities,
@@ -28,6 +29,103 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('MarkdownBlock linkify integration', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('bounds long streaming code highlighting to 150ms and flushes the latest text', () => {
+    vi.useFakeTimers();
+    const highlight = vi.spyOn(hljs, 'highlight');
+    let content = '```javascript\n' + 'const initial = 1;\n'.repeat(300);
+    const view = render(<MarkdownBlock content={content} isStreaming />);
+    for (let increment = 0; increment < 30; increment++) {
+      content += `const value${increment} = ${increment};\n`;
+      view.rerender(<MarkdownBlock content={content} isStreaming />);
+      act(() => vi.advanceTimersByTime(5));
+    }
+    expect(highlight).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('pre code')?.textContent).toContain('value29');
+    content += 'const finalValue = "<safe>&";';
+    view.rerender(<MarkdownBlock content={content} isStreaming={false} />);
+    expect(highlight).toHaveBeenCalledTimes(3);
+    expect(document.querySelector('pre code')?.textContent).toContain('const finalValue = "<safe>&";');
+    act(() => vi.advanceTimersByTime(500));
+    expect(highlight).toHaveBeenCalledTimes(3);
+  });
+
+  it('flushes a closed fence immediately without re-highlighting stable blocks', () => {
+    vi.useFakeTimers();
+    const highlight = vi.spyOn(hljs, 'highlight');
+    const stable = '```js\nconst stable = 1;\n```\n\n';
+    const view = render(<MarkdownBlock content={`${stable}\`\`\`js\nconst tail = 1`} isStreaming />);
+    const stableCode = view.container.querySelector('pre code');
+    view.rerender(<MarkdownBlock content={`${stable}\`\`\`js\nconst tail = 12`} isStreaming />);
+    expect(highlight).toHaveBeenCalledTimes(2);
+    view.rerender(<MarkdownBlock content={`${stable}\`\`\`js\nconst tail = 123;\n\`\`\``} isStreaming />);
+    expect(highlight).toHaveBeenCalledTimes(3);
+    expect(view.container.querySelector('pre code')).toBe(stableCode);
+    expect(view.container.querySelectorAll('pre code')[1].textContent).toContain('123');
+    act(() => vi.advanceTimersByTime(500));
+    expect(highlight).toHaveBeenCalledTimes(3);
+  });
+
+  it('copies the latest pending code through click and keyboard before highlighting catches up', async () => {
+    vi.useFakeTimers();
+    const writeText = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
+    const view = render(<MarkdownBlock content={'```unknown\nfirst'} isStreaming />);
+    view.rerender(<MarkdownBlock content={'```unknown\nfirst\n<latest>& "text"'} isStreaming />);
+    const button = view.container.querySelector('.copy-code-btn') as HTMLElement;
+    fireEvent.click(button);
+    await act(async () => {});
+    expect(writeText).toHaveBeenLastCalledWith('first\n<latest>& "text"\n');
+    view.rerender(<MarkdownBlock content={'```unknown\nfirst\n<latest>& "text"\nlast'} isStreaming />);
+    fireEvent.keyDown(button, { key: 'Enter' });
+    await act(async () => {});
+    expect(writeText).toHaveBeenLastCalledWith('first\n<latest>& "text"\nlast\n');
+    expect(writeText).toHaveBeenCalledTimes(2);
+  });
+
+  it('cancels stale highlights on replacement and unmount while prose updates immediately', () => {
+    vi.useFakeTimers();
+    const highlight = vi.spyOn(hljs, 'highlight');
+    const view = render(<MarkdownBlock content={'```js\nold'} isStreaming />);
+    view.rerender(<MarkdownBlock content={'```js\nold pending'} isStreaming />);
+    view.rerender(<MarkdownBlock content={'```js\nreplacement'} isStreaming />);
+    expect(view.container.querySelector('pre code')?.textContent).toContain('replacement');
+    act(() => vi.advanceTimersByTime(150));
+    expect(highlight).toHaveBeenCalledTimes(2);
+    view.rerender(<MarkdownBlock content="New prose" isStreaming />);
+    view.rerender(<MarkdownBlock content="New prose appears immediately" isStreaming />);
+    expect(view.container.textContent).toContain('appears immediately');
+    view.rerender(<MarkdownBlock content={'```js\nnew'} isStreaming />);
+    view.rerender(<MarkdownBlock content={'```js\nnew pending'} isStreaming />);
+    const beforeUnmount = highlight.mock.calls.length;
+    view.unmount();
+    act(() => vi.advanceTimersByTime(500));
+    expect(highlight).toHaveBeenCalledTimes(beforeUnmount);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each(['```', '~~~', '````'])('preserves special characters in open %s fences after streaming ends', (fence) => {
+    const content = `${fence}unknown\n<node attr="value">& \\[literal\\]`;
+    const view = render(<MarkdownBlock content={content} isStreaming />);
+    expect(view.container.querySelector('pre code')?.textContent).toContain('<node attr="value">& \\[literal\\]');
+    view.rerender(<MarkdownBlock content={content} isStreaming={false} />);
+    expect(view.container.querySelector('pre code')?.textContent).toContain('<node attr="value">& \\[literal\\]');
+    expect(view.container.querySelector('node')).toBeNull();
+  });
+
+  it('does not treat a shorter fence inside a long code fence as completion', () => {
+    vi.useFakeTimers();
+    const content = '````text\n```\n\n<literal>\n';
+    const view = render(<MarkdownBlock content={content} isStreaming />);
+    expect(view.container.querySelectorAll('pre code')).toHaveLength(1);
+    expect(view.container.querySelector('pre code')?.textContent).toContain('```\n\n<literal>');
+    view.rerender(<MarkdownBlock content={`${content}tail\n\`\`\`\``} isStreaming />);
+    expect(view.container.querySelector('pre code')?.textContent).toContain('<literal>\ntail');
+  });
+
   beforeEach(() => {
     resetLinkifyCapabilities();
     bridgeMocks.openBrowser.mockReset();

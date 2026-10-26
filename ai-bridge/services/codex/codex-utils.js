@@ -1,13 +1,7 @@
 /**
  * Codex utility functions.
- * Logging, environment config, SDK initialization, reconnect helpers, and error handling.
+ * Logging, environment config, reconnect helpers, and error handling.
  */
-
-import { loadCodexSdk, isCodexSdkAvailable } from '../../utils/sdk-loader.js';
-import { CodexPermissionMapper } from '../../utils/permission-mapper.js';
-
-// SDK cache
-let codexSdk = null;
 
 // ========== Debug Logging Configuration ==========
 // Log levels: 0 = off, 1 = errors only, 2 = warnings, 3 = info, 4 = debug, 5 = verbose
@@ -128,10 +122,9 @@ export function buildCodexCliEnvironment(baseEnv) {
 }
 
 /**
- * Sets an explicit approval reviewer in Codex CLI configuration.
- * The TypeScript SDK serializes `config` entries as `--config key=value`, while
- * approval policy and sandbox mode remain thread options. Non-auto modes explicitly
- * select the `user` reviewer so resumed threads cannot inherit `auto_review`.
+ * Adds an explicit native approval reviewer to a settings object.
+ * The persistent app-server service sends this value through thread/turn
+ * settings; it is retained here for legacy probe compatibility.
  *
  * @param {object} codexOptions
  * @param {object} permissionConfig
@@ -147,7 +140,7 @@ export function applyCodexApprovalsReviewerConfig(codexOptions, permissionConfig
 }
 
 /**
- * Check whether an installed Codex SDK can honor approvals_reviewer.
+ * Check whether an installed Codex CLI can honor approvals_reviewer.
  * @param {string|null|undefined} version
  * @returns {boolean}
  */
@@ -206,22 +199,6 @@ export const emitStatusMessage = (emitMessage, message) => {
   emitMessage({ type: 'status', message: status });
 };
 
-/**
- * Ensure Codex SDK is loaded.
- */
-export async function ensureCodexSdk() {
-  if (!codexSdk) {
-    if (!isCodexSdkAvailable()) {
-      const error = new Error('Codex SDK not installed. Please install via Settings > Dependencies.');
-      error.code = 'SDK_NOT_INSTALLED';
-      error.provider = 'codex';
-      throw error;
-    }
-    codexSdk = await loadCodexSdk();
-  }
-  return codexSdk;
-}
-
 export const MAX_TOOL_RESULT_CHARS = 20000;
 export const RAW_EVENT_LOG_MAX_CHARS = 12000;
 
@@ -257,9 +234,25 @@ export function buildErrorPayload(error) {
                          rawError.includes('network') ||
                          rawError.includes('fetch failed');
 
+  // Codex holds a persistent per-thread writer lock while a turn runs. This
+  // error means another live Codex process was still writing the thread when
+  // this turn tried to resume it — a local process overlap, NOT an expired
+  // server-side thread. It must not be reported as "create a new session".
+  const isThreadWriterConflict = rawError.includes('already has an active writer');
+
   let userMessage;
 
-  if (isAuthError) {
+  if (isThreadWriterConflict) {
+    userMessage = [
+      'Codex thread is busy:',
+      `- Error message: ${rawError}`,
+      '',
+      'Another Codex process was still writing this thread when this turn started.',
+      'The plugin now stops the previous turn automatically before sending.',
+      'Please wait a few seconds and resend this message.',
+      'You do NOT need to create a new session.'
+    ].join('\n');
+  } else if (isAuthError) {
     userMessage = [
       'Codex authentication error:',
       `- Error message: ${rawError}`,
@@ -297,7 +290,8 @@ export function buildErrorPayload(error) {
       rawError,
       errorName,
       isAuthError,
-      isNetworkError
+      isNetworkError,
+      isThreadWriterConflict
     }
   };
 }

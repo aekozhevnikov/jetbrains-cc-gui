@@ -60,6 +60,8 @@ public class CommitAIClient {
     private static final String COMMIT_SCRIPT = "services/commit-message.js";
     private static final long TIMEOUT_SECONDS = 90;
     private static final long READER_DRAIN_SECONDS = 5;
+    /** Cap on a child-process stdout line kept in the debug log (see {@link #abbreviate}). */
+    private static final int LOG_LINE_MAX_CHARS = 200;
 
     private final Project project;
 
@@ -172,7 +174,10 @@ public class CommitAIClient {
                     String line;
                     while ((line = reader.readLine()) != null) {
                         allOutput.append(line).append("\n");
-                        LOG.info("[CommitAIClient] node: " + line);
+                        // One line per stdout chunk, i.e. one per streamed token. Keep this at
+                        // debug and truncated: at INFO it produced hundreds of lines per
+                        // generation and wrote the generated commit message into idea.log.
+                        LOG.debug("[CommitAIClient] node: " + abbreviate(line));
                         if (line.startsWith("[COMMIT_ERROR]")) {
                             errorMessage.append(line.substring("[COMMIT_ERROR]".length()).trim());
                         } else if (line.startsWith("[CONTENT_DELTA]")) {
@@ -233,6 +238,22 @@ public class CommitAIClient {
             currentProcess = null;
             currentChannelId = null;
         }
+    }
+
+    /**
+     * Cap a child-process stdout line for logging. Streamed token chunks are
+     * worthless in full, and {@code [COMMIT]} lines carry the whole generated
+     * commit message - content that must not be duplicated into idea.log.
+     *
+     * @param line raw stdout line
+     * @return the line, truncated with an ellipsis marker when over the cap
+     */
+    @NotNull
+    private static String abbreviate(@NotNull String line) {
+        if (line.length() <= LOG_LINE_MAX_CHARS) {
+            return line;
+        }
+        return line.substring(0, LOG_LINE_MAX_CHARS) + "... (" + line.length() + " chars)";
     }
 
     /** Parse a stdout delta payload that is a JSON-encoded string (e.g. {@code "Hello"}). */

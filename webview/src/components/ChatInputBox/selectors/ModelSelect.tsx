@@ -65,6 +65,7 @@ export const ModelSelect = ({
     setIsOpen,
     searchQuery,
     setSearchQuery,
+    clearSearch,
     pinnedIds,
     setPinnedIds,
     pinnedSet,
@@ -78,6 +79,8 @@ export const ModelSelect = ({
     hiddenModelCount,
     visibleModelCount,
     showSearch,
+    highlightedModelId,
+    moveHighlight,
   } = useModelSelectState({ value, models, currentProvider, longContextEnabled });
   const buttonRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -112,6 +115,37 @@ export const ModelSelect = ({
   });
   useModelSelectOutsideClick({ embedded, isOpen, buttonRef, dropdownRef, resetSearchAndClose });
 
+  /**
+   * Search-input keyboard navigation: ↑↓ move through the rendered rows,
+   * Enter picks the highlighted one, Esc clears the query first and closes
+   * the dropdown when the query is already empty. Inline dropdowns keep
+   * Escape-with-empty-query bubbling so the parent popover can close.
+   */
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Escape' && !searchQuery && inline) return;
+    e.stopPropagation();
+    // Don't hijack keys while an IME is composing (e.g. confirming pinyin
+    // candidates with Enter — keydown arrives as 'Process'/isComposing).
+    if (e.nativeEvent.isComposing || e.key === 'Process') return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      moveHighlight(e.key === 'ArrowDown' ? 1 : -1);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightedModelId) {
+        handleSelect(highlightedModelId);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      if (searchQuery) {
+        clearSearch();
+      } else {
+        resetSearchAndClose();
+        onClose?.();
+      }
+    }
+  };
+
   const renderDropdown = () => (
     <ModelDropdownContent
       inline={inline}
@@ -120,6 +154,9 @@ export const ModelSelect = ({
       showSearch={showSearch}
       searchQuery={searchQuery}
       onSearchQueryChange={setSearchQuery}
+      onSearchKeyDown={handleSearchKeyDown}
+      onClearSearch={clearSearch}
+      highlightedModelId={highlightedModelId}
       loading={loading}
       error={error}
       onRetry={onRetry}

@@ -86,6 +86,7 @@ interface MessageListProps {
   isThinking: boolean;
   loading: boolean;
   loadingStartTime: number | null;
+  waitingLabel?: string;
   t: TFunction;
   getMessageText: (message: ClaudeMessage) => string;
   getContentBlocks: (message: ClaudeMessage) => ClaudeContentBlock[];
@@ -109,6 +110,7 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
   isThinking,
   loading,
   loadingStartTime,
+  waitingLabel,
   t,
   getMessageText,
   getContentBlocks,
@@ -126,17 +128,25 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
   const [historyPageInfo, setHistoryPageInfo] = useState<CodexHistoryPageInfo | null>(null);
   const [loadingEarlierHistory, setLoadingEarlierHistory] = useState(false);
   const loadingEarlierHistoryRef = useRef(false);
+
+  // Keep the ref in sync with state. Every writer sets both; the sync lives in
+  // an effect because render must stay pure (refs may not be mutated there).
+  useEffect(() => {
+    loadingEarlierHistoryRef.current = loadingEarlierHistory;
+  }, [loadingEarlierHistory]);
   const [detailedOutputEnabled, setDetailedOutputEnabled] = useState(() =>
     getDetailedOutputEnabled()
   );
 
-  // Context menu for message list (copy + quote, when text selected)
+  // Context menu for message list (copy link address / copy + quote selection)
   const ctxMenu = useContextMenu();
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const handleMessageContextMenu = useCallback((e: React.MouseEvent) => {
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) {
+    const target = e.target as HTMLElement | null;
+    const onLink = Boolean(target?.closest?.('a[href]'));
+    const hasSelection = (window.getSelection()?.toString() ?? '').trim().length > 0;
+    if (onLink || hasSelection) {
       ctxMenu.open(e);
     }
   }, [ctxMenu.open]);
@@ -158,31 +168,34 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
     return () => window.removeEventListener('keydown', handleQuoteHotkey);
   }, []);
 
-  // Use explicit session identity in production; keep the message boundary for isolated callers/tests.
-  const previousSessionRef = useRef(currentSessionId);
-  const firstMessageBoundaryRef = useRef(getFirstMessageBoundaryKey(messages[0]));
-  useEffect(() => {
-    const currentBoundary = getFirstMessageBoundaryKey(messages[0]);
-    const sessionChanged = currentSessionId != null
-      ? currentSessionId !== previousSessionRef.current
-      : currentBoundary !== firstMessageBoundaryRef.current;
-    if (sessionChanged) {
-      setRevealedTurnCount(0);
-      setLoadingEarlierHistory(false);
-      loadingEarlierHistoryRef.current = false;
-      const cached = window.__codexHistoryPageInfo;
-      setHistoryPageInfo(
-        currentProvider === 'codex' && cached?.sessionId === currentSessionId ? cached ?? null : null,
-      );
-    }
-    previousSessionRef.current = currentSessionId;
-    firstMessageBoundaryRef.current = currentBoundary;
-  }, [currentProvider, currentSessionId, messages]);
+  // Session-switch reset as a render-time adjustment (React-sanctioned setState
+  // during render): same resets the old prop-change effect performed, without
+  // the extra commit. Identity mirrors the old logic — explicit session id
+  // when available, else the first message boundary for isolated
+  // callers/tests.
+  const sessionIdentity = currentSessionId != null
+    ? `session:${currentSessionId}`
+    : `boundary:${getFirstMessageBoundaryKey(messages[0]) ?? ''}`;
+  const [prevSessionIdentity, setPrevSessionIdentity] = useState(sessionIdentity);
+  if (prevSessionIdentity !== sessionIdentity) {
+    setPrevSessionIdentity(sessionIdentity);
+    setRevealedTurnCount(0);
+    setLoadingEarlierHistory(false);
+    const cached = window.__codexHistoryPageInfo;
+    const claudeCached = window.__claudeHistoryPageInfo;
+    setHistoryPageInfo(
+      currentProvider === 'codex' && cached?.sessionId === currentSessionId ? cached ?? null
+        : currentProvider === 'claude' && claudeCached?.sessionId === currentSessionId ? claudeCached ?? null
+          : null,
+    );
+  }
 
   useEffect(() => {
     const handlePageInfo = (event: Event) => {
       const info = (event as CustomEvent<CodexHistoryPageInfo>).detail;
-      if (currentProvider !== 'codex' || !info || info.sessionId !== currentSessionId) return;
+      if (!info || info.sessionId !== currentSessionId) return;
+      // Accept both codex and claude page info events
+      if (currentProvider !== 'codex' && currentProvider !== 'claude') return;
       setHistoryPageInfo(info);
       setLoadingEarlierHistory(false);
       loadingEarlierHistoryRef.current = false;
@@ -197,13 +210,21 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
 
     window.addEventListener('codex-history-page-info', handlePageInfo);
     window.addEventListener('codex-history-page-error', handlePageError);
+    window.addEventListener('claude-history-page-info', handlePageInfo);
+    window.addEventListener('claude-history-page-error', handlePageError);
     const cached = window.__codexHistoryPageInfo;
     if (currentProvider === 'codex' && cached?.sessionId === currentSessionId) {
       setHistoryPageInfo(cached ?? null);
     }
+    const claudeCached = window.__claudeHistoryPageInfo;
+    if (currentProvider === 'claude' && claudeCached?.sessionId === currentSessionId) {
+      setHistoryPageInfo(claudeCached ?? null);
+    }
     return () => {
       window.removeEventListener('codex-history-page-info', handlePageInfo);
       window.removeEventListener('codex-history-page-error', handlePageError);
+      window.removeEventListener('claude-history-page-info', handlePageInfo);
+      window.removeEventListener('claude-history-page-error', handlePageError);
     };
   }, [currentProvider, currentSessionId]);
 
@@ -223,9 +244,10 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
   const shouldCollapse = collapsedCount > 0;
   const nextTurnCount = Math.min(REVEAL_TURN_PAGE_SIZE, hiddenTurnCount);
 
-  const canLoadEarlierFromDisk = Boolean(currentProvider === 'codex'
-    && historyPageInfo?.sessionId === currentSessionId
-    && historyPageInfo?.hasMore);
+  const canLoadEarlierFromDisk = Boolean(
+    (currentProvider === 'codex' && historyPageInfo?.sessionId === currentSessionId && historyPageInfo?.hasMore)
+    || (currentProvider === 'claude' && historyPageInfo?.sessionId === currentSessionId && historyPageInfo?.hasMore)
+  );
   const handleRevealMore = useCallback(() => {
     if (hiddenTurnCount > 0) {
       setRevealedTurnCount((prev) => prev + REVEAL_TURN_PAGE_SIZE);
@@ -237,15 +259,18 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
 
     loadingEarlierHistoryRef.current = true;
     setLoadingEarlierHistory(true);
-    const sent = sendBridgeEvent('load_codex_history_page', JSON.stringify({
+    const eventName = currentProvider === 'codex' ? 'load_codex_history_page' : 'load_claude_history_page';
+    const sent = sendBridgeEvent(eventName, JSON.stringify({
       sessionId: currentSessionId,
-      beforeTurn: historyPageInfo.fromTurn,
+      ...(historyPageInfo.source === 'native'
+        ? { cursor: historyPageInfo.cursor }
+        : { beforeTurn: historyPageInfo.fromTurn }),
     }));
     if (!sent) {
       loadingEarlierHistoryRef.current = false;
       setLoadingEarlierHistory(false);
     }
-  }, [canLoadEarlierFromDisk, currentSessionId, hiddenTurnCount, historyPageInfo]);
+  }, [canLoadEarlierFromDisk, currentSessionId, hiddenTurnCount, historyPageInfo, currentProvider]);
 
   // Imperative API so the in-page search can expand everything before scanning.
   // Returns the number of messages that were just revealed (0 when nothing
@@ -280,6 +305,10 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
     () => (shouldCollapse ? messages.slice(collapsedCount) : messages),
     [messages, shouldCollapse, collapsedCount]
   );
+  const toolSignatureCache = useMemo(
+    () => new WeakMap<ClaudeMessage, { messageIndex: number; signature: string }>(),
+    [getContentBlocks, findToolResult, currentSessionId],
+  );
   return (
     <div ref={containerRef} onContextMenu={handleMessageContextMenu}>
       {ctxMenu.visible && (
@@ -288,8 +317,16 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
           y={ctxMenu.y}
           onClose={ctxMenu.close}
           items={[
-            { label: t('contextMenu.quote', 'Quote'), action: () => quoteToChatInput(ctxMenu.selectedText) },
-            { label: t('contextMenu.copy', 'Copy'), action: () => copySelection(ctxMenu.savedRange, ctxMenu.selectedText) },
+            // Link action first (browser convention), and independent of any
+            // text selection so right-clicking a link alone still offers it.
+            ...(ctxMenu.linkHref ? [{
+              label: t('contextMenu.copyLink', 'Copy Link Address'),
+              action: () => copySelection(null, ctxMenu.linkHref ?? ''),
+            }] : []),
+            ...(ctxMenu.selectedText ? [
+              { label: t('contextMenu.quote', 'Quote'), action: () => quoteToChatInput(ctxMenu.selectedText) },
+              { label: t('contextMenu.copy', 'Copy'), action: () => copySelection(ctxMenu.savedRange, ctxMenu.selectedText) },
+            ] : []),
           ]}
         />
       )}
@@ -297,6 +334,14 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
         <div
           className="collapsed-messages-indicator"
           onClick={handleRevealMore}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleRevealMore();
+            }
+          }}
         >
           {loadingEarlierHistory
             ? t('chat.loadingEarlierTurns')
@@ -317,7 +362,15 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
       {visibleMessages.map((message, visibleIndex) => {
         const messageIndex = shouldCollapse ? visibleIndex + collapsedCount : visibleIndex;
         const messageKey = messageKeys[messageIndex];
-        const toolResultSignature = getMessageToolResultSignature(message, messageIndex, getContentBlocks, findToolResult);
+        let cachedSignature = toolSignatureCache.get(message);
+        if (!cachedSignature || cachedSignature.messageIndex !== messageIndex) {
+          cachedSignature = {
+            messageIndex,
+            signature: getMessageToolResultSignature(message, messageIndex, getContentBlocks, findToolResult),
+          };
+          toolSignatureCache.set(message, cachedSignature);
+        }
+        const toolResultSignature = cachedSignature.signature;
 
         return (
           <MessageItem
@@ -344,7 +397,7 @@ export const MessageList = memo(forwardRef<MessageListRevealHandle, MessageListP
       })}
 
       {/* Loading indicator */}
-      {loading && <WaitingIndicator startTime={loadingStartTime ?? undefined} />}
+      {loading && <WaitingIndicator startTime={loadingStartTime ?? undefined} label={waitingLabel} />}
       <div ref={messagesEndRef} />
     </div>
   );

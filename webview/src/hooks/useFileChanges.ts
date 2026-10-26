@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ClaudeMessage, ClaudeContentBlock, ToolResultBlock } from '../types';
 import type { FileChangeSummary } from '../types/fileChanges';
 import type { SubagentHistoryResponse } from '../types/subagent';
@@ -9,18 +9,25 @@ import {
   normalizeToolName,
 } from '../utils/toolConstants';
 import { normalizeToolInput } from '../utils/toolInputNormalization';
+import { readPatchFiles, readPatchOutcome } from '../utils/codexPatch';
+import { collectPatchLedger } from '../utils/patchLedger';
+import { PATCH_TOOL_NAMES } from '../utils/toolConstants';
 import { getToolLineInfo } from '../utils/toolPresentation';
 import {
   buildSessionFileLedger,
   diffLineStats,
   ledgerEntriesToSummaries,
+  sameLedgerOps,
   type LedgerOp,
 } from '../utils/sessionFileLedger';
 import {
   isMultiActorPath,
+  FILE_TOUCH_TTL_MS,
+  getDistinctActorsForPath,
   loadFileTouchMap,
   recordFileTouches,
-  wasTouchedOutsideSession,
+  subscribeFileTouches,
+  type FileTouchMap,
 } from '../utils/fileTouchRegistry';
 
 /** Cache for per-snippet diff calculations (EditToolBlock / op metadata) */
@@ -184,6 +191,8 @@ function sameFileChangeSummaries(a: FileChangeSummary[], b: FileChangeSummary[])
         || p.replaceAll !== q.replaceAll
         || p.lineStart !== q.lineStart
         || p.lineEnd !== q.lineEnd
+        || p.toolUseId !== q.toolUseId || p.fileChangeKind !== q.fileChangeKind || p.moveFrom !== q.moveFrom
+        || p.patch !== q.patch || p.ledgerKey !== q.ledgerKey || p.oldStringKnown !== q.oldStringKnown
       ) {
         return false;
       }
@@ -192,16 +201,27 @@ function sameFileChangeSummaries(a: FileChangeSummary[], b: FileChangeSummary[])
   return true;
 }
 
-function collectLedgerOpsFromToolUse(params: {
+interface FileToolInput {
+  sourceId: string;
+  toolUseId?: string;
   toolName: string;
   rawName?: string;
   input: Record<string, unknown>;
   result: ToolResultBlock | null | undefined;
   agentId: string;
-  out: LedgerOp[];
-}): void {
-  const { toolName, rawName, input, result, agentId, out } = params;
+}
+
+function collectLedgerOpsFromToolUse(params: FileToolInput, out: LedgerOp[]): void {
+  const { sourceId, toolUseId, toolName, rawName, input, result, agentId } = params;
   if (!isToolName(toolName, FILE_MODIFY_TOOL_NAMES)) return;
+  if (isToolName(toolName, PATCH_TOOL_NAMES)) {
+    const outcome = readPatchOutcome(input, result);
+    if (!outcome.isCompleted || outcome.isError || outcome.isUnknown) return;
+    for (const file of readPatchFiles(input)) {
+      out.push(...collectPatchLedger(file, { sourceId, toolUseId, agentId }));
+    }
+    return;
+  }
   if (!isSuccessfulResult(result)) return;
 
   const normalized = normalizeToolInput(rawName ?? toolName, input) as Record<string, unknown>;
@@ -215,6 +235,8 @@ function collectLedgerOpsFromToolUse(params: {
     if (pair.oldString === '' && pair.newString === '') continue;
 
     out.push({
+      sourceId,
+      toolUseId,
       filePath,
       toolName,
       oldString: pair.oldString,
@@ -268,7 +290,7 @@ function findToolResultInRawMessages(
 }
 
 function collectFromSubagentHistories(
-  out: LedgerOp[],
+  out: FileToolInput[],
   subagentHistories: Record<string, SubagentHistoryResponse>,
   allowedKeys: Set<string> | null,
 ): void {
@@ -306,13 +328,14 @@ function collectFromSubagentHistories(
         const rawInput = item.input;
         if (!rawInput || typeof rawInput !== 'object') continue;
 
-        collectLedgerOpsFromToolUse({
+        out.push({
+          sourceId: `subagent:${key}`,
+          toolUseId,
           toolName,
           rawName: name,
           input: rawInput as Record<string, unknown>,
           result,
           agentId,
-          out,
         });
       }
     }
@@ -325,6 +348,7 @@ interface UseFileChangesParams {
   findToolResult: (toolUseId?: string, messageIndex?: number) => ToolResultBlock | null;
   /** Start processing messages from this index (for Keep All feature) */
   startFromIndex?: number;
+  ignoredLedgerKeys?: string[];
   /** Background agent sidechain transcripts — their Edit/Write tools must also count */
   subagentHistories?: Record<string, SubagentHistoryResponse>;
   /** Current chat tab session id — for cross-tab multi-agent marks */
@@ -380,14 +404,14 @@ export function useFileChanges({
   getContentBlocks,
   findToolResult,
   startFromIndex = 0,
+  ignoredLedgerKeys,
   subagentHistories,
   currentSessionId = null,
 }: UseFileChangesParams): FileChangeSummary[] {
-  // Pure derivation: messages → ledger entries → summaries. No side effects in
-  // this memo (localStorage touch recording lives in the effect below), so
-  // StrictMode double-invocation and per-message streaming renders stay cheap.
-  const base = useMemo(() => {
-    const ops: LedgerOp[] = [];
+  const cache = useMemo(() => ({ inputs: [] as FileToolInput[], ops: [] as LedgerOp[] }),
+    [currentSessionId, startFromIndex]);
+  const inputs = useMemo(() => {
+    const collected: FileToolInput[] = [];
     const agentKeysAfterBase = new Set<string>();
 
     messages.forEach((message, messageIndex) => {
@@ -416,13 +440,14 @@ export function useFileChanges({
         const agentId = (toolId && ownerByToolId.get(toolId)) || 'main';
 
         const result = findToolResult(block.id, messageIndex);
-        collectLedgerOpsFromToolUse({
+        collected.push({
+          sourceId: 'main',
+          toolUseId: toolId,
           toolName,
           rawName,
           input: rawInput,
           result,
           agentId,
-          out: ops,
         });
       });
     });
@@ -430,7 +455,7 @@ export function useFileChanges({
     if (subagentHistories && Object.keys(subagentHistories).length > 0) {
       const allowedKeys = startFromIndex > 0 ? agentKeysAfterBase : null;
       collectFromSubagentHistories(
-        ops,
+        collected,
         subagentHistories,
         allowedKeys && allowedKeys.size > 0
           ? allowedKeys
@@ -438,50 +463,135 @@ export function useFileChanges({
       );
     }
 
+    const unique = new Map<string | FileToolInput, FileToolInput>();
+    for (const input of collected) {
+      const key = input.toolUseId ? JSON.stringify([input.sourceId, input.toolUseId]) : input;
+      unique.set(key, input);
+    }
+    const next = [...unique.values()];
+    if (cache.inputs.length !== next.length || next.some((input, index) => {
+      const previous = cache.inputs[index];
+      return input.sourceId !== previous.sourceId
+        || input.toolUseId !== previous.toolUseId || input.agentId !== previous.agentId
+        || input.toolName !== previous.toolName || input.rawName !== previous.rawName
+        || input.input !== previous.input || input.result !== previous.result;
+    })) {
+      cache.inputs = next;
+    }
+    return cache.inputs;
+  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories, cache]);
+
+  const ops = useMemo(() => {
+    const collected: LedgerOp[] = [];
+    for (const input of inputs) collectLedgerOpsFromToolUse(input, collected);
+    const ignored = new Set(ignoredLedgerKeys);
+    const next = ignored.size ? collected.filter(op => !ignored.has(JSON.stringify([op.sourceId, op.toolUseId, op.filePath]))) : collected;
+    if (!sameLedgerOps(cache.ops, next)) cache.ops = next;
+    return cache.ops;
+  }, [inputs, cache, ignoredLedgerKeys]);
+
+  const base = useMemo(() => {
     const entries = buildSessionFileLedger(ops);
     const summaries = ledgerEntriesToSummaries(entries);
-    return { entries, summaries };
-  }, [messages, getContentBlocks, findToolResult, startFromIndex, subagentHistories]);
+    return { summaries };
+  }, [ops]);
 
   const [enriched, setEnriched] = useState<FileChangeSummary[]>(base.summaries);
+  const recorded = useRef({
+    sessionId: currentSessionId,
+    assignments: new Map<string, { filePath: string; agentId: string }>(),
+    map: {} as FileTouchMap,
+    outsideUntil: new Map<string, number>(),
+  });
+  const isEmpty = messages.length === 0 && inputs.length === 0;
 
-  // Cross-tab / multi-agent: persist who touched each path, then enrich badges.
-  // Recording is idempotent per actor key, so re-runs on new entries are safe;
-  // setEnriched bails out when content is unchanged so unstable caller props
-  // (new function identity per render) cannot loop effect → state → render.
   useEffect(() => {
-    const { entries, summaries } = base;
-    if (!currentSessionId || summaries.length === 0) {
+    if (recorded.current.sessionId !== currentSessionId || isEmpty) {
+      recorded.current = { sessionId: currentSessionId, assignments: new Map(), map: {}, outsideUntil: new Map() };
+    }
+    const { summaries } = base;
+    if (!currentSessionId) {
       setEnriched((prev) => (sameFileChangeSummaries(prev, summaries) ? prev : summaries));
       return;
     }
 
-    const agentsByPath = new Map<string, string[]>();
-    for (const e of entries) {
-      agentsByPath.set(e.filePath, e.agentIds.length > 0 ? e.agentIds : ['main']);
-    }
-    // Snapshot BEFORE recording this session so "outside session" still sees others
-    const priorMap = loadFileTouchMap();
-    recordFileTouches(
-      summaries.map((s) => s.filePath),
-      currentSessionId,
-      agentsByPath,
-    );
-    const mapAfter = loadFileTouchMap();
+    const rememberOutside = (map: FileTouchMap) => {
+      for (const summary of summaries) {
+        for (const actor of getDistinctActorsForPath(summary.filePath, map)) {
+          if (actor.sessionId === currentSessionId) continue;
+          recorded.current.outsideUntil.set(summary.filePath, Math.max(
+            recorded.current.outsideUntil.get(summary.filePath) ?? 0,
+            actor.updatedAt + FILE_TOUCH_TTL_MS + 1,
+          ));
+        }
+      }
+    };
 
-    const next = summaries.map((s) => {
-      const crossMulti = isMultiActorPath(s.filePath, mapAfter);
-      const outside = wasTouchedOutsideSession(s.filePath, currentSessionId, priorMap);
-      return {
-        ...s,
-        multiAgent: s.multiAgent === true || crossMulti,
-        // Write overwrote a file another tab already touched → show M not A
-        status: outside && s.status === 'A' ? 'M' : s.status,
-        agentIds: s.agentIds,
-      };
-    });
-    setEnriched((prev) => (sameFileChangeSummaries(prev, next) ? prev : next));
-  }, [base, currentSessionId]);
+    const agentsByPath = new Map<string, string[]>();
+    const replacedOwners: Array<{ filePath: string; agentId: string }> = [];
+    for (const op of ops) {
+      const key = JSON.stringify([
+        op.filePath, op.sourceId,
+        op.toolUseId ?? [op.toolName, op.oldString, op.newString, op.replaceAll],
+      ]);
+      const previous = recorded.current.assignments.get(key);
+      if (previous?.agentId === op.agentId) continue;
+      if (previous) replacedOwners.push(previous);
+      recorded.current.assignments.set(key, { filePath: op.filePath, agentId: op.agentId });
+      const agents = agentsByPath.get(op.filePath) ?? [];
+      if (!agents.includes(op.agentId)) agents.push(op.agentId);
+      agentsByPath.set(op.filePath, agents);
+    }
+    if (agentsByPath.size > 0) {
+      const now = Date.now();
+      const priorMap = loadFileTouchMap(now);
+      rememberOutside(priorMap);
+      const map = { ...priorMap };
+      for (const previous of replacedOwners) {
+        if ([...recorded.current.assignments.values()].some((assignment) =>
+          assignment.filePath === previous.filePath && assignment.agentId === previous.agentId)) continue;
+        map[previous.filePath] = (map[previous.filePath] ?? []).filter((actor) =>
+          actor.sessionId !== currentSessionId || actor.agentId !== previous.agentId);
+      }
+      recorded.current.map = recordFileTouches(
+        [...agentsByPath.keys()], currentSessionId, agentsByPath, now, map,
+      );
+    }
+    let expiryTimer: ReturnType<typeof setTimeout> | undefined;
+    const refresh = (map: FileTouchMap) => {
+      clearTimeout(expiryTimer);
+      recorded.current.map = map;
+      if (Object.keys(map).length === 0) recorded.current.outsideUntil.clear();
+      rememberOutside(map);
+      const now = Date.now();
+      for (const [path, expiry] of recorded.current.outsideUntil) {
+        if (expiry <= now) recorded.current.outsideUntil.delete(path);
+      }
+      let nextExpiry = Infinity;
+      const next = summaries.map((summary) => {
+        const outsideExpiry = recorded.current.outsideUntil.get(summary.filePath) ?? 0;
+        if (outsideExpiry > now) nextExpiry = Math.min(nextExpiry, outsideExpiry);
+        for (const actor of getDistinctActorsForPath(summary.filePath, map)) {
+          nextExpiry = Math.min(nextExpiry, actor.updatedAt + FILE_TOUCH_TTL_MS + 1);
+        }
+        return {
+          ...summary,
+          multiAgent: summary.multiAgent === true || isMultiActorPath(summary.filePath, map),
+          status: outsideExpiry > now && summary.status === 'A' ? 'M' as const : summary.status,
+        };
+      });
+      setEnriched((prev) => (sameFileChangeSummaries(prev, next) ? prev : next));
+      if (Number.isFinite(nextExpiry)) {
+        expiryTimer = setTimeout(() => refresh(recorded.current.map), Math.max(1, nextExpiry - now));
+      }
+    };
+    refresh(recorded.current.map);
+    const unsubscribe = subscribeFileTouches(refresh);
+    return () => {
+      unsubscribe();
+      clearTimeout(expiryTimer);
+    };
+  }, [base, ops, currentSessionId, isEmpty]);
 
   return enriched;
 }

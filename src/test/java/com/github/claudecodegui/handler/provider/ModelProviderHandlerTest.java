@@ -92,25 +92,37 @@ public class ModelProviderHandlerTest {
         assertEquals(258_000, ModelProviderHandler.getModelContextLimit("gpt-5.3-codex"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("gpt-5.4"));
         assertEquals(258_000, ModelProviderHandler.getModelContextLimit("gpt-5.2-codex"));
+        // GPT-6 Sol / Luna are the 1.05M-context successors of the GPT-5.6 entries.
+        assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6.1-sol"));
+        assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6-sol"));
+        assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6-luna"));
     }
 
     @Test
     public void shouldReturnCorrectContextLimitsForClaudeModels() {
         // Base IDs without [1m] suffix - 200k context by default
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5-5"));
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5-5[1m]"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5[1m]"));
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5-5"));
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5-5[1m]"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5[1m]"));
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-5-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-fable-5"));
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-7"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-6"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-4-8"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-4-6"));
         // IDs with [1m] suffix - 1M context
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-opus-5-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-opus-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-fable-5[1m]"));
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-7[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-6[1m]"));
@@ -225,6 +237,26 @@ public class ModelProviderHandlerTest {
         assertTrue(raw.has("usage"));
         assertFalse(usagePushService.cleared);
         assertFalse(usagePushService.recalculated);
+    }
+
+    /**
+     * A set_model from the webview is an explicit user choice. A custom model id
+     * that is also in the retired-migration table must reach the session verbatim
+     * instead of being rewritten to its replacement (custom opus-4-8 -> opus-5).
+     */
+    @Test
+    public void handleSetModelStoresCustomRetiredIdVerbatim() {
+        HandlerContext context = createHandlerContext();
+        ClaudeSession session = new ClaudeSession(null, null, null, null);
+        session.setProvider("claude");
+        context.setSession(session);
+        context.setCurrentProvider("claude");
+        RecordingUsagePushService usagePushService = new RecordingUsagePushService(context);
+
+        new ModelProviderHandler(context, usagePushService).handleSetModel("claude-opus-4-8[1m]");
+
+        assertEquals("claude-opus-4-8[1m]", context.getCurrentModel());
+        assertEquals("claude-opus-4-8[1m]", session.getModel());
     }
 
     private static HandlerContext createHandlerContext() {

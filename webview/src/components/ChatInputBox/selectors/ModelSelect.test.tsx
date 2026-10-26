@@ -81,7 +81,9 @@ describe('ModelSelect', () => {
     expect(CLAUDE_MODELS.map((model) => model.id)).toEqual([
       'claude-fable-5-1',
       'claude-fable-5',
+      'claude-opus-5-5',
       'claude-opus-5',
+      'claude-sonnet-5-5',
       'claude-sonnet-5',
       'claude-haiku-4-5',
     ]);
@@ -97,12 +99,16 @@ describe('ModelSelect', () => {
   it('Codex 内置模型列表应与目标设计一致', () => {
     expect(CODEX_MODELS.map((model) => model.id)).toEqual([
       'gpt-6-astra',
+      'gpt-6.1-sol',
+      'gpt-6-sol',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
+      'gpt-6-luna',
       'gpt-5.6-luna',
       'gpt-5.5',
-      'gpt-5.4',
     ]);
+    const codexIds = CODEX_MODELS.map((model) => model.id);
+    expect(codexIds).not.toContain('gpt-5.4');
   });
 
   it('loading 时应显示加载状态', () => {
@@ -223,6 +229,109 @@ describe('ModelSelect', () => {
     expect(screen.queryByTestId('model-group-deepseek')).toBeNull();
   });
 
+  it('多词搜索应按 AND 语义匹配，未命中时回显搜索词', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek flash' } });
+    expect(screen.getByTestId('model-option-deepseek/deepseek-v4-flash-free')).toBeTruthy();
+    expect(screen.queryByTestId('model-option-opencode/longcat-2.0-free')).toBeNull();
+
+    fireEvent.change(input, { target: { value: 'big deepseek' } });
+    expect(screen.queryByTestId('model-option-deepseek/deepseek-v4-flash-free')).toBeNull();
+    expect(screen.getByTestId('model-no-results').textContent).toBe('models.noSearchMatches');
+
+    fireEvent.change(input, { target: { value: '' } });
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+  });
+
+  it('搜索框应提供清空按钮，点击后恢复完整列表', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.queryByTestId('model-search-clear')).toBeNull();
+
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek' } });
+    expect(input.value).toBe('deepseek');
+
+    fireEvent.click(screen.getByTestId('model-search-clear'));
+    expect(input.value).toBe('');
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+    // Dropdown stays open after clearing.
+    expect(screen.getByTestId('model-search-input')).toBeTruthy();
+  });
+
+  it('搜索激活时应预高亮第一条，↑↓ 移动高亮，Enter 选中', () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={onChange}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input');
+    fireEvent.change(input, { target: { value: 'free' } });
+
+    // First hit is pre-highlighted while searching.
+    const first = screen.getByTestId('model-option-opencode/longcat-2.0-free');
+    expect(first.className).toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const second = screen.getByTestId('model-option-deepseek/deepseek-v4-flash-free');
+    expect(second.className).toContain('keyboard-highlighted');
+    expect(first.className).not.toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(second.className).toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('deepseek/deepseek-v4-flash-free');
+    expect(screen.queryByTestId('model-search-input')).toBeNull();
+  });
+
+  it('Escape 应先清空搜索词，再次按下时才关闭下拉', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek' } });
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input.value).toBe('');
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByTestId('model-search-input')).toBeNull();
+  });
+
   it('置顶后模型应出现在 Pinned 分组顶部', () => {
     render(
       <ModelSelect
@@ -288,5 +397,57 @@ describe('ModelSelect', () => {
     );
     expect(screen.getByRole('button').textContent).toContain('Sonnet 4.6');
     expect(screen.getByRole('button').textContent).not.toContain('glm-4');
+  });
+
+  describe('自定义模型与已下线迁移表', () => {
+    const opus5: ModelInfo = { id: 'claude-opus-5', label: 'Opus 5' };
+    const customOpus48: ModelInfo = { id: 'claude-opus-4-8', label: 'My Opus 4.8', isCustom: true };
+
+    it('选中的自定义模型只勾选自己，不会同时勾选它在迁移表里的替代模型', () => {
+      render(
+        <ModelSelect
+          value="claude-opus-4-8"
+          onChange={vi.fn()}
+          models={[opus5, customOpus48]}
+          currentProvider="claude"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button'));
+
+      expect(screen.getByTestId('model-option-claude-opus-4-8').className).toContain('selected');
+      expect(screen.getByTestId('model-option-claude-opus-5').className).not.toContain('selected');
+    });
+
+    it('自定义模型命中迁移表时显示"已下线"标签，内置模型不显示', () => {
+      render(
+        <ModelSelect
+          value="claude-opus-5"
+          onChange={vi.fn()}
+          models={[opus5, customOpus48]}
+          currentProvider="claude"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button'));
+
+      expect(screen.getByTestId('model-retired-claude-opus-4-8')).toBeTruthy();
+      expect(screen.queryByTestId('model-retired-claude-opus-5')).toBeNull();
+    });
+
+    it('未命中迁移表的自定义模型（如 claude-opus-4-6）不显示标签', () => {
+      const customOpus46: ModelInfo = { id: 'claude-opus-4-6', label: 'Opus 4.6', isCustom: true };
+      render(
+        <ModelSelect
+          value="claude-opus-4-6"
+          onChange={vi.fn()}
+          models={[opus5, customOpus46]}
+          currentProvider="claude"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button'));
+
+      expect(screen.queryByTestId('model-retired-claude-opus-4-6')).toBeNull();
+      expect(screen.getByTestId('model-option-claude-opus-4-6').className).toContain('selected');
+      expect(screen.getByTestId('model-option-claude-opus-5').className).not.toContain('selected');
+    });
   });
 });

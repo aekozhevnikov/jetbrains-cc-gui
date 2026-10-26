@@ -12,7 +12,7 @@ import {
 } from '../../config/api-config.js';
 import { loadEnvFile, applyEnvFileVars } from '../../utils/envLoader.js';
 import { selectWorkingDirectory } from '../../utils/path-utils.js';
-import { mapModelIdToSdkName, resolveModelFromSettings, setModelEnvironmentVariables } from '../../utils/model-utils.js';
+import { resolveModelFromSettings, resolveSdkModelName, setModelEnvironmentVariables } from '../../utils/model-utils.js';
 import { AsyncStream } from '../../utils/async-stream.js';
 import { canUseTool } from '../../permission-handler.js';
 import { buildContentBlocks, loadAttachments } from './attachment-service.js';
@@ -75,7 +75,7 @@ function resolveThinkingConfig(settings) {
 /**
  * Build query options object shared by both send functions.
  */
-function buildQueryOptions({ workingDirectory, permissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId }) {
+function buildQueryOptions({ workingDirectory, permissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId, settingsEnv }) {
   const claudeCliOverride = getClaudeCliPathOverride();
   return {
     cwd: workingDirectory,
@@ -84,7 +84,7 @@ function buildQueryOptions({ workingDirectory, permissionMode, sdkModelName, max
     maxTurns: 1000,
     enableFileCheckpointing: true,
     env: buildCliEnv(),
-    settings: buildWebviewControlledSettingsOverride(modelId),
+    settings: buildWebviewControlledSettingsOverride(modelId, settingsEnv),
     ...(maxThinkingTokens !== undefined && { maxThinkingTokens }),
     ...(streamingEnabled && { includePartialMessages: true }),
     additionalDirectories: Array.from(
@@ -511,11 +511,12 @@ export async function sendMessage(message, resumeSessionId = null, cwd = null, p
     try { process.chdir(workingDirectory); } catch (e) { console.error('[WARNING] chdir failed:', e.message); }
     console.log('[DEBUG] Working directory:', workingDirectory);
 
-    const sdkModelName = mapModelIdToSdkName(model);
     const settings = loadClaudeSettings();
     const resolvedModel = resolveModelFromSettings(model, settings?.env);
+    // Exact id, not the family alias - see resolveSdkModelName.
+    const sdkModelName = resolveSdkModelName(model, resolvedModel);
     console.log('[DEBUG] Model:', model, '->', sdkModelName, '(API:', resolvedModel + ')');
-    setModelEnvironmentVariables(resolvedModel, model);
+    setModelEnvironmentVariables(resolvedModel, model, settings?.env);
 
     const systemPromptAppend = buildSystemPromptAppend(openedFiles, agentPrompt, message);
 
@@ -542,7 +543,7 @@ export async function sendMessage(message, resumeSessionId = null, cwd = null, p
 
     const preToolUseHook = createPreToolUseHook(effectivePermissionMode, workingDirectory);
     const mcpServers = await loadMcpServersConfigAsRecord(workingDirectory);
-    const options = buildQueryOptions({ workingDirectory, permissionMode: effectivePermissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId: model });
+    const options = buildQueryOptions({ workingDirectory, permissionMode: effectivePermissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId: model, settingsEnv: settings?.env });
 
     if (normalizedReasoningEffort) {
       options.effort = normalizedReasoningEffort;
@@ -594,11 +595,11 @@ export async function sendMessageWithAttachments(message, resumeSessionId = null
 
     const systemPromptAppend = buildSystemPromptAppend(openedFiles, agentPrompt, message);
 
-    const sdkModelName = mapModelIdToSdkName(model);
     const settings = loadClaudeSettings();
     const resolvedAttachModel = resolveModelFromSettings(model, settings?.env);
+    const sdkModelName = resolveSdkModelName(model, resolvedAttachModel);
     console.log('[DEBUG] (withAttachments) Model:', model, '->', resolvedAttachModel);
-    setModelEnvironmentVariables(resolvedAttachModel, model);
+    setModelEnvironmentVariables(resolvedAttachModel, model, settings?.env);
 
     const contentBlocks = await buildContentBlocks(attachments, message);
     const userMessage = {
@@ -618,7 +619,7 @@ export async function sendMessageWithAttachments(message, resumeSessionId = null
     console.log('[DEBUG] (withAttachments) Config:', { normalizedPermissionMode, alwaysThinkingEnabled, maxThinkingTokens, streamingEnabled, reasoningEffort });
 
     const mcpServers = await loadMcpServersConfigAsRecord(workingDirectory);
-    const options = buildQueryOptions({ workingDirectory, permissionMode: normalizedPermissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId: model });
+    const options = buildQueryOptions({ workingDirectory, permissionMode: normalizedPermissionMode, sdkModelName, maxThinkingTokens, streamingEnabled, systemPromptAppend, preToolUseHook, sdkStderrLines, mcpServers, modelId: model, settingsEnv: settings?.env });
 
     if (reasoningEffort) {
       options.effort = reasoningEffort;

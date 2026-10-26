@@ -1,6 +1,7 @@
 import styles from './style.module.less';
 import { useTranslation } from 'react-i18next';
 import type { DiffThemeMode } from '../../../utils/diffTheme';
+import ListboxSelect from '../shared/ListboxSelect';
 
 interface DiffThemeSectionProps {
   diffTheme: DiffThemeMode;
@@ -10,26 +11,22 @@ interface DiffThemeSectionProps {
 const DiffThemeSection = ({ diffTheme, onDiffThemeChange }: DiffThemeSectionProps) => {
   const { t } = useTranslation();
 
-  const diffThemeOptions: Array<{ value: DiffThemeMode; label: string; desc: string }> = [
+  const diffThemeOptions = [
     {
       value: 'follow',
-      label: t('settings.basic.diffTheme.follow'),
-      desc: t('settings.basic.diffTheme.followDesc'),
+      label: `${t('settings.basic.diffTheme.follow')} — ${t('settings.basic.diffTheme.followDesc')}`,
     },
     {
       value: 'editor',
-      label: t('settings.basic.diffTheme.editor'),
-      desc: t('settings.basic.diffTheme.editorDesc'),
+      label: `${t('settings.basic.diffTheme.editor')} — ${t('settings.basic.diffTheme.editorDesc')}`,
     },
     {
       value: 'light',
-      label: t('settings.basic.diffTheme.light'),
-      desc: t('settings.basic.diffTheme.lightDesc'),
+      label: `${t('settings.basic.diffTheme.light')} — ${t('settings.basic.diffTheme.lightDesc')}`,
     },
     {
       value: 'soft-dark',
-      label: t('settings.basic.diffTheme.softDark'),
-      desc: t('settings.basic.diffTheme.softDarkDesc'),
+      label: `${t('settings.basic.diffTheme.softDark')} — ${t('settings.basic.diffTheme.softDarkDesc')}`,
     },
   ];
 
@@ -40,17 +37,12 @@ const DiffThemeSection = ({ diffTheme, onDiffThemeChange }: DiffThemeSectionProp
         <span className={styles.fieldLabel}>{t('settings.basic.diffTheme.label')}</span>
       </div>
 
-      <select
-        className={styles.languageSelect}
+      <ListboxSelect
         value={diffTheme}
-        onChange={(e) => onDiffThemeChange(e.target.value as DiffThemeMode)}
-      >
-        {diffThemeOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label} — {option.desc}
-          </option>
-        ))}
-      </select>
+        options={diffThemeOptions}
+        onChange={(value) => onDiffThemeChange(value as DiffThemeMode)}
+        ariaLabel={t('settings.basic.diffTheme.label')}
+      />
     </div>
   );
 };

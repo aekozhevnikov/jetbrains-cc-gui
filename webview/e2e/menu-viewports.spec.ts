@@ -236,7 +236,139 @@ test('footer selector menus render inside the viewport', async ({ page }) => {
   expect(significantErrors(errors)).toEqual([]);
 });
 
-test('Codex auto review appears only after the SDK confirms support', async ({ page }) => {
+async function expectCodexQuotaToLeaveRowsClickable(page: Page) {
+  await page.goto('/');
+  const providerButton = page.locator('.button-area-left .selector-button').nth(1);
+  await providerButton.click();
+
+  const providerDropdown = page.locator('.provider-dropdown');
+  await expect(providerDropdown).toBeVisible();
+  const codexRow = providerDropdown.locator('[data-provider-id="codex"]');
+  const codexBox = await codexRow.boundingBox();
+  expect(codexBox).not.toBeNull();
+  await codexRow.hover();
+  await expect(providerDropdown.getByText('Codex quota')).toBeVisible();
+  await expectInsideViewport(page, providerDropdown, 'provider dropdown with Codex quota');
+
+  const quotaPanel = providerDropdown.locator('.provider-quota-panel');
+  await expect(quotaPanel).toBeVisible();
+  await expectInsideViewport(page, quotaPanel, 'loading Codex quota');
+
+  await page.evaluate(() => window.updateCodexSubscriptionQuota?.(JSON.stringify({
+    status: 'ok',
+    fetchedAt: Date.now(),
+    windows: {
+      fiveHour: { usedTokens: 80, remainingPercent: 20, resetsAt: Date.now() + 3_600_000 },
+      weekly: { usedTokens: 68, remainingPercent: 32, resetsAt: Date.now() + 86_400_000 },
+    },
+  })));
+  await expect(quotaPanel.getByText(/20% remaining/)).toBeVisible();
+  await expectInsideViewport(page, quotaPanel, 'loaded Codex quota');
+  const quotaBox = await quotaPanel.boundingBox();
+  expect(quotaBox?.height).toBeGreaterThan(100);
+  expect(await quotaPanel.evaluate((panel) => panel.scrollWidth <= panel.clientWidth),
+    'quota details should wrap without horizontal scrolling').toBe(true);
+  const rowIsUncovered = await codexRow.evaluate((row) => {
+    const rect = row.getBoundingClientRect();
+    return [4, rect.width / 2, rect.width - 4].every((offset) =>
+      row.contains(document.elementFromPoint(rect.left + offset, rect.top + rect.height / 2)),
+    );
+  });
+  expect(rowIsUncovered, 'quota must leave the entire Codex row clickable').toBe(true);
+
+  // Click where the pointer entered, not a locator that follows a displaced row.
+  await page.mouse.click(codexBox!.x + codexBox!.width - 4, codexBox!.y + codexBox!.height / 2);
+  await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'codex');
+}
+
+test('Codex quota stays within the viewport without moving provider rows', async ({ page }) => {
+  await expectCodexQuotaToLeaveRowsClickable(page);
+});
+
+test('Codex quota stays readable when the viewport is both narrow and short', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 365 });
+  await expectCodexQuotaToLeaveRowsClickable(page);
+});
+
+test('tabbing from a pointer-opened provider menu continues through the toolbar', async ({ page }) => {
+  await page.goto('/');
+  const toolbarButtons = page.locator('.button-area-left .selector-button');
+  const providerButton = toolbarButtons.nth(1);
+
+  for (const { key, targetIndex } of [{ key: 'Tab', targetIndex: 2 }, { key: 'Shift+Tab', targetIndex: 0 }]) {
+    await providerButton.click();
+    await expect(providerButton).toBeFocused();
+    await expect(page.locator('.provider-dropdown')).toBeVisible();
+    await page.keyboard.press(key);
+    await expect(providerButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.locator('.provider-dropdown')).toHaveCount(0);
+    await expect(toolbarButtons.nth(targetIndex)).toBeFocused();
+  }
+});
+
+test('confirming a beta provider with Enter keeps the menu closed', async ({ page }) => {
+  await page.goto('/');
+  const providerButton = page.locator('.button-area-left .selector-button').nth(1);
+  await providerButton.focus();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-provider-id="grok"]')).toBeFocused();
+  await page.keyboard.press('Enter');
+  const confirm = page.locator('.alert-dialog .confirm-button');
+  await expect(confirm).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(page.locator('.alert-dialog')).toHaveCount(0);
+  await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'grok');
+  await expect(providerButton).toHaveAttribute('aria-expanded', 'false');
+  await expect(providerButton).toBeFocused();
+});
+
+for (const fontSizeLevel of [3, 6]) {
+  test(`Codex quota supports pointer entry, selection and scrolling at font level ${fontSizeLevel}`, async ({ page }) => {
+    if (fontSizeLevel === 6) await page.setViewportSize({ width: 393, height: 365 });
+    await page.addInitScript((level) => {
+      localStorage.setItem('fontSizeLevel', String(level));
+    }, fontSizeLevel);
+    await page.goto('/');
+    const providerButton = page.locator('.button-area-left .selector-button').nth(1);
+    await providerButton.click();
+    const providerDropdown = page.locator('.provider-dropdown');
+    const codexRow = providerDropdown.locator('[data-provider-id="codex"]');
+    await codexRow.hover();
+    const quotaPanel = providerDropdown.locator('.provider-quota-panel');
+    await expect(quotaPanel).toBeVisible();
+    await page.evaluate(() => window.updateCodexSubscriptionQuota?.(JSON.stringify({
+      status: 'ok', fetchedAt: Date.now(),
+      windows: { fiveHour: { remainingPercent: 20 }, weekly: { remainingPercent: 32 } },
+    })));
+    await expect(quotaPanel.getByText(/20% remaining/)).toBeAttached();
+    const quotaBox = await quotaPanel.boundingBox();
+    expect(quotaBox).not.toBeNull();
+    await page.mouse.move(quotaBox!.x + quotaBox!.width / 2, quotaBox!.y + quotaBox!.height / 2, { steps: 20 });
+    await expect(quotaPanel).toBeVisible();
+    await page.mouse.click(quotaBox!.x + quotaBox!.width / 2, quotaBox!.y + quotaBox!.height / 2);
+    await expect(quotaPanel).toBeFocused();
+    await expect(providerButton).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'claude');
+    await expectInsideViewport(page, quotaPanel, 'interactive quota panel');
+
+    await page.keyboard.press('End');
+    const remaining = quotaPanel.getByText(/32% remaining/);
+    await expect(remaining).toBeInViewport();
+    await remaining.dblclick();
+    await expect.poll(() => page.evaluate(() => window.getSelection()?.toString().length ?? 0)).toBeGreaterThan(0);
+    await expect(quotaPanel).toBeVisible();
+    await page.keyboard.press('Home');
+    await expect(quotaPanel.getByText('Codex quota')).toBeInViewport();
+    await page.keyboard.press('Escape');
+    await expect(providerButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(providerButton).toBeFocused();
+  });
+}
+
+test('Codex native auto review is independent of the legacy SDK status', async ({ page }) => {
   await page.addInitScript(() => {
     // JCEF sets this before user changes can be persisted across tabs.
     window.__CCGUI_PAGE_CONTEXT_READY__ = true;
@@ -247,26 +379,23 @@ test('Codex auto review appears only after the SDK confirms support', async ({ p
   await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'codex');
   await page.locator('.button-area-left .selector-button').nth(2).click();
   await expect(page.getByTestId('mode-option-default')).toBeVisible();
-  await expect(page.getByTestId('mode-option-auto')).toHaveCount(0);
-
-  await page.evaluate(() => window.updateDependencyStatus?.(JSON.stringify({
-    'codex-sdk': { installed: true, meetsMinimumVersion: true },
-  })));
   await expect(page.getByTestId('mode-option-auto')).toBeVisible();
   await page.getByTestId('mode-option-auto').click();
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('model-selection-state') || '{}',
   ).codexPermissionMode)).toBe('auto');
 
+  // The legacy dependency callback may still report package metadata, but it
+  // must not revoke the app-server native capability.
   await page.evaluate(() => window.updateDependencyStatus?.(JSON.stringify({
     'codex-sdk': { installed: true, meetsMinimumVersion: false },
   })));
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('model-selection-state') || '{}',
-  ).codexPermissionMode)).toBe('default');
+  ).codexPermissionMode)).toBe('auto');
   await page.locator('.button-area-left .selector-button').nth(2).click();
   await expect(page.getByTestId('mode-option-default')).toBeVisible();
-  await expect(page.getByTestId('mode-option-auto')).toHaveCount(0);
+  await expect(page.getByTestId('mode-option-auto')).toBeVisible();
 });
 
 test('config submenus stay visible across constrained viewports', async ({ page }) => {
@@ -370,3 +499,39 @@ test('large model selector remains searchable and capped', async ({ page }) => {
 
   expect(significantErrors(errors)).toEqual([]);
 });
+
+for (const fontSizeLevel of [2, 3, 6]) {
+  test(`reasoning submenu stays attached at font level ${fontSizeLevel}`, async ({ page }, testInfo) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: 496, height: 340 });
+    await page.addInitScript((level) => {
+      localStorage.setItem('fontSizeLevel', String(level));
+      const saved = JSON.parse(localStorage.getItem('model-selection-state') || '{}');
+      localStorage.setItem('model-selection-state', JSON.stringify({
+        ...saved, provider: 'codex', codexModel: 'gpt-5.6-sol',
+      }));
+    }, fontSizeLevel);
+    await page.goto('/');
+    await page.getByTestId('model-config-trigger').click();
+    const effortRow = page.getByTestId('model-config-option-effort');
+    await effortRow.click();
+    const submenu = page.getByTestId('reasoning-selector-dropdown');
+    await expect(submenu.locator('.selector-option')).toHaveCount(5);
+
+    // Geometry must settle after the entrance animation before testing attachment.
+    await submenu.evaluate((element) => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    await expectInsideViewport(page, submenu, 'reasoning submenu');
+    await expectSubmenuAnchoredToRow(page, effortRow, submenu, 'reasoning submenu');
+    await page.screenshot({ path: testInfo.outputPath('reasoning-menu.png'), animations: 'disabled' });
+
+    await page.setViewportSize({ width: 393, height: 300 });
+    await expect(async () => {
+      await expectInsideViewport(page, submenu, 'resized reasoning submenu');
+      await expectSubmenuAnchoredToRow(page, effortRow, submenu, 'resized reasoning submenu');
+    }).toPass({ timeout: 5_000 });
+    await submenu.locator('.selector-option').last().click();
+    await expect(submenu).toHaveCount(0);
+    await expect(page.getByTestId('model-config-trigger')).toContainText(/max/i);
+    expect(significantErrors(errors)).toEqual([]);
+  });
+}

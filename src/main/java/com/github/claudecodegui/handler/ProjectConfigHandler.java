@@ -19,6 +19,8 @@ import com.intellij.openapi.fileChooser.FileChooserDescriptor;
 import com.intellij.openapi.vfs.LocalFileSystem;
 import com.intellij.openapi.vfs.VirtualFile;
 
+import java.io.IOException;
+
 /**
  * Handles project-level configuration: working directory, streaming, sandbox mode,
  * auto-open file, send shortcut, commit prompt, IDE theme, editor font config, and usage statistics.
@@ -164,14 +166,15 @@ public class ProjectConfigHandler {
         }
     }
 
+    /** Saves an explicit directory choice and retargets the active Codex thread at its next turn. */
     public void handleSetWorkingDirectory(String content) {
         try {
-            String projectPath = context.getProject().getBasePath();
+            String projectPath = this.context.getProject().getBasePath();
             if (projectPath == null) {
                 showError("Unable to resolve project path");
                 return;
             }
-            JsonObject json = gson.fromJson(content, JsonObject.class);
+            JsonObject json = this.gson.fromJson(content, JsonObject.class);
             String customWorkingDir = readString(json, "customWorkingDir", null);
             if (customWorkingDir != null && !customWorkingDir.trim().isEmpty()) {
                 java.io.File workingDirFile = new java.io.File(customWorkingDir);
@@ -183,7 +186,15 @@ public class ProjectConfigHandler {
                     return;
                 }
             }
-            settingsService.setCustomWorkingDirectory(projectPath, customWorkingDir);
+            this.settingsService.setCustomWorkingDirectory(projectPath, customWorkingDir);
+            if (this.context.getSession() != null && "codex".equals(this.context.getSession().getProvider())) {
+                this.context.getSession().setCwd(this.settingsService.getEffectiveWorkingDirectory(projectPath));
+                this.context.getSession().getState().setCodexCwdExplicit(true);
+            }
+            JsonObject response = new JsonObject();
+            response.addProperty("projectPath", projectPath);
+            response.addProperty("customWorkingDir", customWorkingDir == null ? "" : customWorkingDir);
+            this.pushJson("window.updateWorkingDirectory", response);
             LOG.info("[ProjectConfigHandler] Set custom working directory: " + customWorkingDir);
             showSuccess("Working directory config saved");
         } catch (Exception e) {
@@ -212,8 +223,13 @@ public class ProjectConfigHandler {
 
     public void handleGetCodexSandboxMode() {
         respondWithJson("window.updateCodexSandboxMode",
-            () -> jsonOf("sandboxMode", settingsService.getCodexSandboxMode(context.getProject().getBasePath())),
-            jsonOf("sandboxMode", "workspace-write"),
+            () ->
+                // Legacy project-level record only. It never takes part in a turn,
+                // so it must not be reported as the desired or effective policy:
+                // the live scope travels with each send, and the app-server echoes
+                // the confirmed policy back through thread/settings/updated.
+                sandboxPayload(settingsService.getCodexSandboxMode(context.getProject().getBasePath()), "legacy"),
+            sandboxPayload("workspace-write", "default"),
             "Failed to get Codex sandbox mode");
     }
 
@@ -226,13 +242,19 @@ public class ProjectConfigHandler {
             LOG.info("[ProjectConfigHandler] Set Codex sandbox mode: " + sandboxMode);
             ApplicationManager.getApplication().invokeLater(() -> {
                 context.callJavaScript("window.updateCodexSandboxMode",
-                    context.escapeJs(gson.toJson(jsonOf("sandboxMode", sandboxMode))));
+                    context.escapeJs(gson.toJson(sandboxPayload(sandboxMode, "user"))));
                 context.callJavaScript("window.showSuccessI18n", "toast.saveSuccess");
             });
         } catch (Exception e) {
             LOG.error("[ProjectConfigHandler] Failed to set Codex sandbox mode: " + e.getMessage(), e);
             showError("Failed to save Codex sandbox mode: " + e.getMessage());
         }
+    }
+
+    private static JsonObject sandboxPayload(String mode, String source) {
+        JsonObject result = jsonOf("sandboxMode", mode);
+        result.addProperty("sandboxSource", source);
+        return result;
     }
 
     public void handleGetAutoOpenFileEnabled() {
@@ -613,6 +635,48 @@ public class ProjectConfigHandler {
         dispatchUiFontConfigUpdate();
     }
 
+    /**
+     * Save an explicit scale choice and acknowledge it through the existing font configuration channel.
+     *
+     * @param content JSON payload containing an integer fontSizeLevel from 1 to 6 and an optional fontSizeRequestId
+     */
+    public void handleSetFontSizeLevel(String content) {
+        try {
+            this.dispatchUiFontConfigUpdate(this.setFontSizeLevelAndCreateResponse(content));
+        } catch (Exception e) {
+            LOG.warn("[ProjectConfigHandler] Failed to save font size level", e);
+            this.showError("Failed to save font size level: " + e.getMessage());
+        }
+    }
+
+    JsonObject setFontSizeLevelAndCreateResponse(String content) throws IOException {
+        JsonObject json = this.gson.fromJson(content, JsonObject.class);
+        JsonElement value = json == null ? null : json.get("fontSizeLevel");
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Font size level must be a number");
+        }
+        int level;
+        try {
+            level = value.getAsBigDecimal().intValueExact();
+        } catch (ArithmeticException e) {
+            // Gson's "Rounding necessary" is not a readable rejection for the user.
+            throw new IllegalArgumentException("Font size level must be an integer between 1 and 6");
+        }
+        if (level < 1 || level > 6) {
+            throw new IllegalArgumentException("Font size level must be an integer between 1 and 6");
+        }
+        JsonElement requestId = json.get("fontSizeRequestId");
+        if (requestId != null && (!requestId.isJsonPrimitive() || !requestId.getAsJsonPrimitive().isString())) {
+            throw new IllegalArgumentException("Font size request ID must be a string");
+        }
+        this.settingsService.setFontSizeLevel(level);
+        JsonObject response = FontConfigService.getResolvedUiFontConfig(this.settingsService);
+        if (requestId != null) {
+            response.add("fontSizeRequestId", requestId.deepCopy());
+        }
+        return response;
+    }
+
     public void handleSetUiFontConfig(String content) {
         try {
             JsonObject json = gson.fromJson(content, JsonObject.class);
@@ -863,11 +927,18 @@ public class ProjectConfigHandler {
 
     private void dispatchUiFontConfigUpdate() {
         try {
-            String uiFontConfigJson = FontConfigService.getResolvedUiFontConfigJson(settingsService);
-            ApplicationManager.getApplication().invokeLater(() -> {
-                context.callJavaScript("window.onUiFontConfigReceived", context.escapeJs(uiFontConfigJson));
-                context.callJavaScript("window.applyUiFontConfig", context.escapeJs(uiFontConfigJson));
-            });
+            this.dispatchUiFontConfigUpdate(FontConfigService.getResolvedUiFontConfig(this.settingsService));
+        } catch (Exception e) {
+            LOG.error("[ProjectConfigHandler] Failed to dispatch UI font config: " + e.getMessage(), e);
+        }
+    }
+
+    private void dispatchUiFontConfigUpdate(JsonObject uiFontConfig) {
+        try {
+            String uiFontConfigJson = uiFontConfig.toString();
+            // The queue schedules EDT delivery and must capture this page before the handler returns.
+            this.context.callJavaScript("window.onUiFontConfigReceived", this.context.escapeJs(uiFontConfigJson));
+            this.context.callJavaScript("window.applyUiFontConfig", this.context.escapeJs(uiFontConfigJson));
         } catch (Exception e) {
             LOG.error("[ProjectConfigHandler] Failed to dispatch UI font config: " + e.getMessage(), e);
         }

@@ -2,6 +2,27 @@ import { renderHook } from '@testing-library/react';
 import type { Attachment } from '../types.js';
 import { useSubmitHandler } from './useSubmitHandler.js';
 
+it.each(['/compact', '/review', '/diff', '/approvals'])('dispatches Codex control %s while CLI discovery is pending', (command) => {
+  vi.useFakeTimers();
+  try {
+    const onSubmit = vi.fn();
+    const addToast = vi.fn();
+    const close = vi.fn();
+    const { result } = renderHook(() => useSubmitHandler({
+      getTextContent: () => command, invalidateCache: vi.fn(), attachments: [],
+      sdkStatusLoading: true, sdkInstalled: false, currentProvider: 'codex', clearInput: vi.fn(),
+      externalAttachments: undefined, setInternalAttachments: vi.fn(),
+      fileCompletion: { close }, commandCompletion: { close }, agentCompletion: { close },
+      promptCompletion: { close }, dollarCommandCompletion: { close }, recordInputHistory: vi.fn(),
+      onSubmit, addToast, t: (key) => key,
+    }));
+    result.current();
+    vi.runAllTimers();
+    expect(onSubmit).toHaveBeenCalledWith(command, undefined);
+    expect(addToast).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
 function createAttachment(id: string): Attachment {
   return { id, fileName: `${id}.txt`, mediaType: 'text/plain', data: 'ZGF0YQ==' };
 }
@@ -18,12 +39,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => '',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: false,
         sdkInstalled: true,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },
@@ -53,12 +72,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => 'hello',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: true,
-        sdkInstalled: true,
+        sdkInstalled: false,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },
@@ -78,6 +95,42 @@ describe('useSubmitHandler', () => {
     expect(clearInput).not.toHaveBeenCalled();
   });
 
+  it('sends while the shared SDK query is still loading when this provider is already installed', () => {
+    vi.useFakeTimers();
+    const addToast = vi.fn();
+    const onSubmit = vi.fn();
+    const close = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSubmitHandler({
+        getTextContent: () => 'hello',
+        invalidateCache: vi.fn(),
+        attachments: [],
+        sdkStatusLoading: true,
+        sdkInstalled: true,
+        currentProvider: 'grok',
+        clearInput: vi.fn(),
+        externalAttachments: undefined,
+        setInternalAttachments: vi.fn(),
+        fileCompletion: { close },
+        commandCompletion: { close },
+        agentCompletion: { close },
+        promptCompletion: { close },
+        dollarCommandCompletion: { close },
+        recordInputHistory: vi.fn(),
+        onSubmit,
+        addToast,
+        t: (key) => key,
+      })
+    );
+
+    result.current();
+    vi.advanceTimersByTime(20);
+    expect(addToast).not.toHaveBeenCalled();
+    expect(onSubmit).toHaveBeenCalledWith('hello', undefined);
+    vi.useRealTimers();
+  });
+
   it('prompts install when SDK is missing', () => {
     const addToast = vi.fn();
     const onInstallSdk = vi.fn();
@@ -87,12 +140,10 @@ describe('useSubmitHandler', () => {
         getTextContent: () => 'hello',
         invalidateCache: vi.fn(),
         attachments: [],
-        isLoading: false,
         sdkStatusLoading: false,
         sdkInstalled: false,
         currentProvider: 'codex',
         clearInput: vi.fn(),
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close: vi.fn() },
@@ -113,6 +164,35 @@ describe('useSubmitHandler', () => {
     expect(onInstallSdk).toHaveBeenCalled();
   });
 
+  it.each(['prompt', ''])('preserves the %s draft while image attachments are pending', (content) => {
+    const clearInput = vi.fn();
+    const setInternalAttachments = vi.fn();
+    const invalidateImagePastes = vi.fn();
+    const addToast = vi.fn();
+    const close = vi.fn();
+    const onSubmit = vi.fn();
+    const recordInputHistory = vi.fn();
+    const { result } = renderHook(() => useSubmitHandler({
+      getTextContent: () => content,
+      invalidateCache: vi.fn(), attachments: [], sdkStatusLoading: false, sdkInstalled: true,
+      currentProvider: 'claude', clearInput, externalAttachments: undefined,
+      setInternalAttachments, hasPendingImagePastes: () => true, invalidateImagePastes,
+      fileCompletion: { close }, commandCompletion: { close }, agentCompletion: { close },
+      promptCompletion: { close }, dollarCommandCompletion: { close },
+      recordInputHistory, onSubmit, addToast, t: (key) => key,
+    }));
+
+    result.current();
+
+    expect(addToast).toHaveBeenCalledWith('chat.pasteImagePreparing', 'info');
+    expect(clearInput).not.toHaveBeenCalled();
+    expect(setInternalAttachments).not.toHaveBeenCalled();
+    expect(invalidateImagePastes).not.toHaveBeenCalled();
+    expect(recordInputHistory).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it('submits content, closes completions, records history, and clears input', () => {
     vi.useFakeTimers();
     const clearInput = vi.fn();
@@ -120,18 +200,19 @@ describe('useSubmitHandler', () => {
     const close = vi.fn();
     const onSubmit = vi.fn();
     const invalidateCache = vi.fn();
+    const invalidateImagePastes = vi.fn();
 
     const { result } = renderHook(() =>
       useSubmitHandler({
         getTextContent: () => 'hello',
         invalidateCache,
         attachments: [createAttachment('a1')],
-        isLoading: false,
+        hasPendingImagePastes: () => false,
+        invalidateImagePastes,
         sdkStatusLoading: false,
         sdkInstalled: true,
         currentProvider: 'claude',
         clearInput,
-        cancelPendingInput: vi.fn(),
         externalAttachments: undefined,
         setInternalAttachments: vi.fn(),
         fileCompletion: { close },
@@ -147,6 +228,7 @@ describe('useSubmitHandler', () => {
 
     result.current();
     expect(invalidateCache).toHaveBeenCalled();
+    expect(invalidateImagePastes).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(5);
     expect(recordInputHistory).toHaveBeenCalledWith('hello');
     expect(clearInput).toHaveBeenCalled();

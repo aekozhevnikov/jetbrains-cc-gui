@@ -6,6 +6,9 @@ import com.github.claudecodegui.settings.CodemossSettingsService;
 import com.github.claudecodegui.handler.AgentHandler;
 import com.github.claudecodegui.handler.ClipboardHandler;
 import com.github.claudecodegui.handler.ContextHandler;
+import com.github.claudecodegui.handler.CodexInteractionHandler;
+import com.github.claudecodegui.handler.CodexNativeDataHandler;
+import com.github.claudecodegui.handler.CodexWorkspaceDiffHandler;
 import com.github.claudecodegui.handler.CodexMcpServerHandler;
 import com.github.claudecodegui.handler.CodexPetHandler;
 import com.github.claudecodegui.handler.CliModelsHandler;
@@ -97,6 +100,12 @@ public class ChatWindowDelegate {
         boolean isDisposed();
         void callJavaScript(String fn, String... args);
         void executeJavaScriptCode(String jsCode);
+
+        /**
+         * Capture an ordered script sender for the current browser page.
+         */
+        HandlerContext.JsSender captureJavaScriptExecutor();
+
         Content getParentContent();
         String getOriginalTabName();
         void setOriginalTabName(String name);
@@ -141,6 +150,7 @@ public class ChatWindowDelegate {
     // Reference to the SettingsHandler for clean theme-callback unregistration on dispose.
     private com.github.claudecodegui.handler.SettingsHandler settingsHandler;
     private com.github.claudecodegui.watcher.McpConfigFileWatcher mcpConfigFileWatcher;
+    private volatile ClipboardHandler clipboardHandler;
 
     public ChatWindowDelegate(DelegateHost host) {
         this.host = host;
@@ -181,6 +191,12 @@ public class ChatWindowDelegate {
                     bridge.setSessionId(sessionId);
                 }
             }
+        }
+        // Grok is not a MarkerCliBridge. Its daemon reads CLAUDE_SESSION_ID once at
+        // launch; PermissionService only sees files under this same id.
+        com.github.claudecodegui.provider.grok.GrokSDKBridge grokSDKBridge = host.getGrokSDKBridge();
+        if (grokSDKBridge != null) {
+            grokSDKBridge.setSessionId(sessionId);
         }
     }
 
@@ -324,6 +340,10 @@ public class ChatWindowDelegate {
                 host.executeJavaScriptCode(jsCode);
             }
             @Override
+            public HandlerContext.JsSender captureJavaScriptExecutor() {
+                return host.captureJavaScriptExecutor();
+            }
+            @Override
             public String escapeJs(String str) {
                 return JsUtils.escapeJs(str);
             }
@@ -388,8 +408,12 @@ public class ChatWindowDelegate {
         messageDispatcher.registerHandler(new CliModelsHandler(handlerContext));
         messageDispatcher.registerHandler(new CliStatusHandler(handlerContext));
         messageDispatcher.registerHandler(new DshHostHandler(handlerContext));
-        messageDispatcher.registerHandler(new ClipboardHandler(handlerContext));
+        this.clipboardHandler = new ClipboardHandler(handlerContext);
+        messageDispatcher.registerHandler(this.clipboardHandler);
         messageDispatcher.registerHandler(new NodeProcessHandler(handlerContext));
+        messageDispatcher.registerHandler(new CodexInteractionHandler(handlerContext));
+        messageDispatcher.registerHandler(new CodexNativeDataHandler(handlerContext));
+        messageDispatcher.registerHandler(new CodexWorkspaceDiffHandler(handlerContext));
 
         messageDispatcher.registerHandler(new WindowEventHandler(handlerContext, new WindowEventHandler.Callback() {
             @Override public void onHeartbeat(String content) { host.getWebviewWatchdog().handleHeartbeat(content); }
@@ -446,7 +470,9 @@ public class ChatWindowDelegate {
                 // instead of interrupting the in-flight turn.
                 LOG.info("[HistoryHandler] Same-session resume, soft-reloading transcript: " + sessionId);
                 if (model != null && !model.trim().isEmpty()) {
-                    current.setModel(model.trim());
+                    // The payload model is webview-normalized (custom ids kept
+                    // verbatim, retired built-ins already migrated there).
+                    current.setModelVerbatim(model.trim());
                 }
                 host.reloadActiveSessionMessages();
             } else {
@@ -633,27 +659,24 @@ public class ChatWindowDelegate {
         }
         host.persistTabSessionState();
 
-        if (pendingQuickFixPrompt != null && pendingQuickFixCallback != null) {
+        if (this.pendingQuickFixPrompt != null && this.pendingQuickFixCallback != null) {
             LOG.info("Processing pending QuickFix message after frontend ready");
-            String prompt = pendingQuickFixPrompt;
-            MessageCallback callback = pendingQuickFixCallback;
-            pendingQuickFixPrompt = null;
-            pendingQuickFixCallback = null;
+            String prompt = this.pendingQuickFixPrompt;
+            MessageCallback callback = this.pendingQuickFixCallback;
+            this.pendingQuickFixPrompt = null;
+            this.pendingQuickFixCallback = null;
             ApplicationManager.getApplication().executeOnPooledThread(() -> {
-                executePendingQuickFix(prompt, callback);
+                this.executePendingQuickFix(prompt, callback);
             });
         }
 
-        // flush(null) may deep-copy live messages left by the previous stream, and
-        // the coalescer contract requires the message-state lock for that copy.
-        // No session means no live writer, so the lockless call is then safe.
-        ClaudeSession currentSession = host.getSession();
-        if (currentSession == null) {
-            host.getStreamCoalescer().flush(null);
-            return;
-        }
-        synchronized (currentSession.getState().getMessageStateLock()) {
-            host.getStreamCoalescer().flush(null);
+        // replayCurrentSessionStateToFrontend already force-fulls the live transcript
+        // through the coalescer. A second flush would serialize the same snapshot
+        // again and discard the first. Only the no-session path still flushes:
+        // replay is a no-op then, and the coalescer may still hold a parked snapshot
+        // from the previous page.
+        if (this.host.getSession() == null) {
+            this.host.getStreamCoalescer().flush(null);
         }
     }
 
@@ -795,7 +818,29 @@ public class ChatWindowDelegate {
         }
     }
 
+    /** Preserve the action's gesture-time image through the shared clipboard handler. */
+    public void offerClipboardImage(java.awt.Image image) {
+        ClipboardHandler handler = this.clipboardHandler;
+        if (handler != null) {
+            handler.offerImagePaste(image);
+        }
+    }
+
+    /** Read an intercepted macOS paste before asking the webview to claim its draft. */
+    public void captureClipboardPaste() {
+        ClipboardHandler handler = this.clipboardHandler;
+        if (handler != null) {
+            handler.captureClipboardPaste();
+        }
+    }
+
+    /** Release clipboard snapshots and window-scoped callbacks during teardown. */
     public void dispose() {
+        ClipboardHandler handler = this.clipboardHandler;
+        this.clipboardHandler = null;
+        if (handler != null) {
+            handler.dispose();
+        }
         if (statusResetTask != null && !statusResetTask.isDone()) {
             statusResetTask.cancel(false);
             statusResetTask = null;

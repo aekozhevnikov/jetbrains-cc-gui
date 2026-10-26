@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import styles from './style.module.less';
 import { useTranslation } from 'react-i18next';
+import ListboxSelect from '../shared/ListboxSelect';
 
 const FOLLOW_IDEA_LANGUAGE = '__follow_idea__';
 
@@ -39,10 +40,12 @@ const LanguageSection = () => {
     return () => window.removeEventListener('language-config-applied', resync);
   }, [i18n.language]);
 
-  const languageOptions = LANGUAGE_OPTIONS;
+  const languageOptions = LANGUAGE_OPTIONS.map((option) => ({
+    value: option.value,
+    label: t(option.label),
+  }));
 
-  const handleLanguageChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const language = event.target.value;
+  const handleLanguageChange = (language: string) => {
     // Optimistic UI update. Java owns the persisted config and pushes the
     // authoritative state back via applyIdeaLanguageConfig, which is the
     // single writer for localStorage language keys.
@@ -67,17 +70,12 @@ const LanguageSection = () => {
         <span className="codicon codicon-globe" />
         <span className={styles.fieldLabel}>{t('settings.basic.language.label')}</span>
       </div>
-      <select
-        className={styles.languageSelect}
+      <ListboxSelect
         value={languageSelection}
+        options={languageOptions}
         onChange={handleLanguageChange}
-      >
-        {languageOptions.map((option) => (
-          <option key={option.value} value={option.value}>
-            {t(option.label)}
-          </option>
-        ))}
-      </select>
+        ariaLabel={t('settings.basic.language.label')}
+      />
     </div>
   );
 };

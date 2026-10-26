@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { resolveClaudeCommitPath, buildCommitAskRequest } from './commit-message.js';
+import { resolveClaudeCommitPath, buildCommitAskRequest, askClaudeNonStreaming, buildClaudeAgentCommitOptions } from './commit-message.js';
 
 // ---------- resolveClaudeCommitPath (#1655) ----------
 
@@ -41,4 +41,79 @@ test('buildCommitAskRequest disables thinking so reasoning models still emit tex
   assert.equal(request.model, 'deepseek-reasoner');
   assert.equal(request.max_tokens, 2048);
   assert.deepEqual(request.messages, [{ role: 'user', content: 'write a commit message' }]);
+});
+// ---------- askClaudeNonStreaming (#1805) ----------
+
+test('askClaudeNonStreaming uses the shared ask request shape', async () => {
+  const requests = [];
+  const client = {
+    messages: {
+      create: async (request) => {
+        requests.push(request);
+        return { content: [{ type: 'text', text: 'feat: add fallback' }] };
+      },
+    },
+  };
+  const text = await askClaudeNonStreaming(client, 'deepseek-reasoner', 'write a commit message');
+  assert.equal(text, 'feat: add fallback');
+  assert.equal(requests.length, 1);
+  // The fallback exists precisely for DeepSeek, where a bare request returns
+  // only thinking blocks (#1693) - it must keep thinking disabled and the
+  // 2048 ceiling, same as the streaming ask path.
+  assert.deepEqual(requests[0].thinking, { type: 'disabled' });
+  assert.equal(requests[0].max_tokens, 2048);
+});
+
+test('askClaudeNonStreaming retries once on empty text then gives up', async () => {
+  let calls = 0;
+  const client = {
+    messages: {
+      create: async () => {
+        calls += 1;
+        return { content: [{ type: 'thinking', thinking: '...' }] };
+      },
+    },
+  };
+  const text = await askClaudeNonStreaming(client, 'deepseek-reasoner', 'prompt');
+  assert.equal(text, '');
+  assert.equal(calls, 2);
+});
+
+// ---------- buildClaudeAgentCommitOptions (MCP bootstrap cost) ----------
+
+function buildAgentOptions(overrides = {}) {
+  return buildClaudeAgentCommitOptions({
+    model: 'claude-sonnet-5',
+    sdkModelName: 'claude-sonnet-5',
+    workingDirectory: '/tmp',
+    claudeCliOverride: null,
+    ...overrides,
+  });
+}
+
+test('buildClaudeAgentCommitOptions suppresses MCP servers', () => {
+  const options = buildAgentOptions();
+  // Booting the user's configured MCP servers happens before the first token
+  // and cost ~12s in practice, versus ~0.5s with them suppressed. Commit
+  // generation is a plain text-to-text call, so no MCP server may be loaded.
+  assert.equal(options.strictMcpConfig, true);
+  assert.equal('mcpServers' in options, false);
+});
+
+test('buildClaudeAgentCommitOptions keeps the deny-all tool posture', async () => {
+  const options = buildAgentOptions();
+  // Mirror of the existing security contract: the commit prompt is built from
+  // third-party-controlled text (git diffs), so a prompt-injected tool call must
+  // stay denied and project/local settings must not be loaded.
+  assert.deepEqual(options.settingSources, ['user']);
+  const decision = await options.canUseTool();
+  assert.equal(decision.behavior, 'deny');
+});
+
+test('buildClaudeAgentCommitOptions forwards the CLI path override only when set', () => {
+  assert.equal('pathToClaudeCodeExecutable' in buildAgentOptions(), false);
+  assert.equal(
+    buildAgentOptions({ claudeCliOverride: '/opt/claude' }).pathToClaudeCodeExecutable,
+    '/opt/claude',
+  );
 });

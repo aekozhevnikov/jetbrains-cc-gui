@@ -9,6 +9,7 @@ import type {
   ToolResultBlock,
 } from '../types';
 import type { GetToolResultRawFn } from '../contexts/SubagentContext';
+import type { RestoredSessionTitle } from '../contexts/SessionContext';
 import type { RewindableMessage } from '../components/RewindSelectDialog';
 import { formatTime } from '../utils/helpers';
 import {
@@ -21,6 +22,7 @@ import {
   computeStatusScopeMessages,
   finalizeSubagentsForSettledTurn,
   finalizeTodosForSettledTurn,
+  isToolResultOnlyUserMessage,
   selectLatestSubagentTurn,
   sliceLatestConversationTurn,
 } from '../utils/turnScope';
@@ -29,6 +31,8 @@ import { extractSubagentsFromMessages, useSubagents } from './useSubagents';
 import { useCodexSubagentStatusPolling } from './useCodexSubagentStatusPolling';
 import { useFileChanges } from './useFileChanges';
 import { useFileChangesManagement } from './useFileChangesManagement';
+import { useCodexSessionEdits } from './useCodexSessionEdits';
+import type { FileChangeSummary } from '../types';
 import type { useMessageProcessing } from './useMessageProcessing';
 
 interface UseChatComputationsParams {
@@ -37,12 +41,23 @@ interface UseChatComputationsParams {
   mergedMessages: ClaudeMessage[];
   subagentHistories: Record<string, SubagentHistoryResponse>;
   customSessionTitle: string | null;
+  restoredSessionTitle: RestoredSessionTitle | null;
   streamingActive: boolean;
   currentProvider: string;
   currentSessionId: string | null;
   currentSessionIdRef: RefObject<string | null>;
   getMessageText: ReturnType<typeof useMessageProcessing>['getMessageText'];
   getContentBlocks: ReturnType<typeof useMessageProcessing>['getContentBlocks'];
+}
+
+interface ToolResultEntry {
+  result: ToolResultBlock;
+  raw: ClaudeRawMessage;
+}
+
+interface ToolResultSnapshot {
+  sessionId: string | null;
+  entries: Map<string, ToolResultEntry>;
 }
 
 /**
@@ -63,6 +78,58 @@ function sliceHasToolUse(
     }
   }
   return false;
+}
+
+/**
+ * Resolve the title shown in the session header, in priority order: a
+ * user-set custom title, the CLI-derived title carried by a history page,
+ * then the first real prompt among the loaded messages. The CLI title matters
+ * for paginated history: a page may not span the session's first prompt, so
+ * prompt-derivation alone would surface a mid-conversation row.
+ */
+export function deriveSessionTitle(params: {
+  customSessionTitle: string | null;
+  restoredSessionTitle: RestoredSessionTitle | null;
+  currentSessionId: string | null;
+  messages: ClaudeMessage[];
+  fallbackTitle: string;
+  getMessageText: (message: ClaudeMessage) => string;
+}): string {
+  const {
+    customSessionTitle,
+    restoredSessionTitle,
+    currentSessionId,
+    messages,
+    fallbackTitle,
+    getMessageText,
+  } = params;
+  if (customSessionTitle) return customSessionTitle;
+  // Only a title keyed to the session on screen may show; a stale entry from a
+  // previously opened session falls through to the message-derived title.
+  if (restoredSessionTitle && restoredSessionTitle.sessionId === currentSessionId) {
+    return restoredSessionTitle.title;
+  }
+  if (messages.length === 0) return fallbackTitle;
+  // Pick the first REAL prompt: skip meta/caveat messages and anything whose
+  // text is raw internal XML (e.g. <local-command-caveat>) so the tag is
+  // never leaked as the session title.
+  let text = '';
+  for (const message of messages) {
+    if (message.type !== 'user') continue;
+    const raw = message.raw;
+    if (raw && typeof raw === 'object' && raw.isMeta === true) continue;
+    // Tool-result carriers are CLI-injected rows, not user input; a paginated
+    // page can start with one, and it must never become the session title.
+    if (isToolResultOnlyUserMessage(message)) continue;
+    const candidate = getMessageText(message).trim();
+    if (!candidate) continue;
+    if (candidate.startsWith('<')) continue;
+    if (containsAnyTag(candidate, INTERNAL_METADATA_TAGS) || hasTaskNotificationTag(candidate)) continue;
+    text = candidate;
+    break;
+  }
+  if (!text) return fallbackTitle;
+  return text.length > 15 ? `${text.substring(0, 15)}...` : text;
 }
 
 export function deriveTodosForTurn(
@@ -130,6 +197,7 @@ export function useChatComputations({
   mergedMessages,
   subagentHistories,
   customSessionTitle,
+  restoredSessionTitle,
   streamingActive,
   currentProvider,
   currentSessionId,
@@ -137,58 +205,61 @@ export function useChatComputations({
   getMessageText,
   getContentBlocks,
 }: UseChatComputationsParams) {
-  // Scan over messages for tool_result blocks, with a per-id ref-backed cache.
-  const toolResultRawMapRef = useRef<Map<string, ClaudeRawMessage>>(new Map());
+  const rawResults = useMemo(() => new WeakMap<ClaudeRawMessage, ToolResultEntry[]>(), [currentSessionId]);
+  const previousSnapshot = useRef<ToolResultSnapshot | null>(null);
+  const toolResults = useMemo(() => {
+    const entries = new Map<string, ToolResultEntry>();
+    for (const message of messages) {
+      const raw = message.raw;
+      if (!raw || typeof raw !== 'object') continue;
+      let extracted = rawResults.get(raw);
+      if (!extracted) {
+        const content = raw.content ?? raw.message?.content;
+        extracted = Array.isArray(content)
+          ? content.filter((block): block is ToolResultBlock => block?.type === 'tool_result')
+            .map((result) => ({ result, raw }))
+          : [];
+        rawResults.set(raw, extracted);
+      }
+      for (const entry of extracted) {
+        const toolId = entry.result.tool_use_id;
+        if (toolId) entries.set(toolId, entry);
+      }
+    }
+    const previous = previousSnapshot.current;
+    if (previous?.sessionId === currentSessionId && previous.entries.size === entries.size
+      && Array.from(entries).every(([id, entry]) => previous.entries.get(id) === entry)) {
+      return previous.entries;
+    }
+    previousSnapshot.current = { sessionId: currentSessionId, entries };
+    return entries;
+  }, [messages, currentSessionId, rawResults]);
 
-  const findToolResult = useCallback((toolUseId?: string, messageIndex?: number): ToolResultBlock | null => {
-    if (!toolUseId || typeof messageIndex !== 'number') return null;
-    const currentMessages = messages;
-    const cachedRaw = toolResultRawMapRef.current.get(toolUseId);
-    if (cachedRaw != null) {
-      const content = cachedRaw.content ?? cachedRaw.message?.content;
-      if (Array.isArray(content)) {
-        const hit = content.find(
-          (block): block is ToolResultBlock =>
-            Boolean(block) && block.type === 'tool_result' && block.tool_use_id === toolUseId,
-        );
-        if (hit) return hit;
-      }
-    }
-    for (let i = 0; i < currentMessages.length; i += 1) {
-      const candidate = currentMessages[i];
-      const raw = candidate.raw;
-      if (!raw || typeof raw === 'string') continue;
-      const content = raw.content ?? raw.message?.content;
-      if (!Array.isArray(content)) continue;
-      const resultBlock = content.find(
-        (block): block is ToolResultBlock =>
-          Boolean(block) && block.type === 'tool_result' && block.tool_use_id === toolUseId,
-      );
-      if (resultBlock) {
-        toolResultRawMapRef.current.set(toolUseId, raw);
-        return resultBlock;
-      }
-    }
-    return null;
-  }, [messages]);
+  const findToolResult = useCallback((toolUseId?: string, messageIndex?: number): ToolResultBlock | null => (
+    toolUseId && typeof messageIndex === 'number' ? toolResults.get(toolUseId)?.result ?? null : null
+  ), [toolResults]);
 
   const getToolResultRaw = useCallback<GetToolResultRawFn>(
-    (toolUseId: string) => toolResultRawMapRef.current.get(toolUseId) ?? null,
-    [],
+    (toolUseId: string) => toolResults.get(toolUseId)?.raw ?? null,
+    [toolResults],
   );
 
   // File changes (depend on findToolResult which is now stable above).
+  const editMessages = useCodexSessionEdits(currentProvider, currentSessionId, messages, streamingActive);
+  const fileChangesRef = useRef<FileChangeSummary[]>([]);
   const fileChangeMgmt = useFileChangesManagement({
-    currentSessionId, currentSessionIdRef, messages,
+    currentSessionId, currentSessionIdRef, messages, currentProvider, fileChangesRef,
     getContentBlocks, findToolResult,
   });
   const fileChanges = useFileChanges({
-    messages, getContentBlocks, findToolResult,
+    messages: editMessages, getContentBlocks, findToolResult,
     startFromIndex: fileChangeMgmt.baseMessageIndex,
+    ignoredLedgerKeys: fileChangeMgmt.ignoredLedgerKeys,
     // Sidechain Edit/Write from Agent/Task tools must appear in the Edits tab too
     subagentHistories,
     currentSessionId,
   });
+  fileChangesRef.current = fileChanges;
 
   const filteredFileChanges = useMemo(() => {
     if (fileChangeMgmt.processedFiles.length === 0) return fileChanges;
@@ -304,27 +375,14 @@ export function useChatComputations({
     return result;
   }, [mergedMessages, currentProvider, canRewindFromMessageIndex, getMessageText]);
 
-  const sessionTitle = useMemo(() => {
-    if (customSessionTitle) return customSessionTitle;
-    if (messages.length === 0) return t('common.newSession');
-    // Pick the first REAL prompt: skip meta/caveat messages and anything whose
-    // text is raw internal XML (e.g. <local-command-caveat>) so the tag is
-    // never leaked as the session title.
-    let text = '';
-    for (const message of messages) {
-      if (message.type !== 'user') continue;
-      const raw = message.raw;
-      if (raw && typeof raw === 'object' && raw.isMeta === true) continue;
-      const candidate = getMessageText(message).trim();
-      if (!candidate) continue;
-      if (candidate.startsWith('<')) continue;
-      if (containsAnyTag(candidate, INTERNAL_METADATA_TAGS) || hasTaskNotificationTag(candidate)) continue;
-      text = candidate;
-      break;
-    }
-    if (!text) return t('common.newSession');
-    return text.length > 15 ? `${text.substring(0, 15)}...` : text;
-  }, [customSessionTitle, messages, t, getMessageText]);
+  const sessionTitle = useMemo(() => deriveSessionTitle({
+    customSessionTitle,
+    restoredSessionTitle,
+    currentSessionId,
+    messages,
+    fallbackTitle: t('common.newSession'),
+    getMessageText,
+  }), [customSessionTitle, restoredSessionTitle, currentSessionId, messages, t, getMessageText]);
 
   return {
     findToolResult,
@@ -332,6 +390,7 @@ export function useChatComputations({
     fileChangeMgmt,
     filteredFileChanges,
     subagents,
+    allSubagents: extractedSubagents,
     globalTodos,
     rewindableMessages,
     sessionTitle,

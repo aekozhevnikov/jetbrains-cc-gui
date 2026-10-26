@@ -126,9 +126,6 @@ export async function sendMessage(
       resolvedAuth.authMethod,
       false
     );
-    if (reasoningEffort) {
-      env.GROK_REASONING_EFFORT = String(reasoningEffort);
-    }
 
     const result = await runAcpTurn({
       message,
@@ -139,6 +136,7 @@ export async function sendMessage(
       baseUrl: resolvedAuth.baseUrl,
       authMethod: resolvedAuth.authMethod,
       permissionMode: perm,
+      reasoningEffort,
       agentPrompt,
       openedFiles,
       attachments: atts,

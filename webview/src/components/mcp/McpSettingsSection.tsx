@@ -26,6 +26,7 @@ import { McpDialogs } from './McpSettingsSection/McpDialogs';
 import { McpToolTooltip, type HoveredToolState } from './McpSettingsSection/McpToolTooltip';
 import { getMcpMessagePrefix, resolveInitialMcpProvider, type McpProvider } from './providerSelection';
 import { buildServerCardIndex } from './serverCardKey';
+import { useCodexNativeCatalog } from '../../hooks/useCodexNativeCatalog';
 
 /**
  * MCP Server Settings Component
@@ -82,6 +83,7 @@ export function McpSettingsSection({ currentProvider = 'claude' }: McpSettingsSe
 function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider }) {
   const { t } = useTranslation();
   const isCodexMode = currentProvider === 'codex';
+  const nativeCatalog = useCodexNativeCatalog(currentProvider, '', isCodexMode, 'mcp');
 
   // Generate message type prefix based on provider
   const messagePrefix = useMemo(() => getMcpMessagePrefix(currentProvider), [currentProvider]);
@@ -158,6 +160,7 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
     addToast,
     loadServers,
     loadServerStatus,
+    reloadNative: nativeCatalog.reloadMcp,
     t,
   });
 
@@ -255,7 +258,10 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
         onToggleDropdown={() => setShowDropdown(!showDropdown)}
         onShowHelp={() => setShowHelpDialog(true)}
         onShowLog={() => setShowLogDialog(true)}
-        onRefresh={handleRefresh}
+        onRefresh={() => {
+          handleRefresh();
+          if (isCodexMode) nativeCatalog.reloadMcp();
+        }}
         onAddManual={handleAddManual}
         onAddFromMarket={handleAddFromMarket}
         onImportFromCopilot={handleImportFromCopilot}
@@ -283,6 +289,18 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
         onCopyUrl={handleCopyUrl}
         onToolHover={handleToolHover}
       />
+      {isCodexMode && nativeCatalog.error && <div role="alert">{nativeCatalog.error}</div>}
+      {isCodexMode && nativeCatalog.mcpServers.length > 0 && (
+        <div className="mcp-native-catalog" data-testid="codex-native-mcp-status">
+          <small>{t('mcp.nativeStatus', { defaultValue: 'Native Codex MCP status' })}</small>
+          {nativeCatalog.mcpServers.map((server, index) => (
+            <div key={String(server.name ?? server.id ?? index)}>
+              {String(server.name ?? server.id ?? 'server')}: {String(server.runtimeStatus ?? 'unknown')}
+              {' · '}{String(server.authStatus ?? 'unknown')}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Dialogs */}
       <McpDialogs

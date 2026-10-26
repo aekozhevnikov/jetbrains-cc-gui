@@ -1,5 +1,7 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ModelInfo } from '../types';
+import { isRetiredClaudeModelId } from '../types';
 import type { ClaudeModelMapping } from '../../../utils/claudeModelMapping';
 import { ProviderModelIcon } from '../../shared/ProviderModelIcon';
 import {
@@ -18,6 +20,8 @@ interface ModelOptionRowProps {
   isPinned: boolean;
   label: string;
   description?: string;
+  /** Keyboard-navigated row (model search ↑↓); scrolls itself into view. */
+  isHighlighted?: boolean;
   onSelect: (modelId: string) => void;
   onTogglePin: (e: React.MouseEvent, modelId: string) => void;
 }
@@ -34,15 +38,35 @@ export const ModelOptionRow = ({
   isPinned,
   label,
   description,
+  isHighlighted = false,
   onSelect,
   onTogglePin,
 }: ModelOptionRowProps) => {
   const { t } = useTranslation();
+  const rowRef = useRef<HTMLDivElement>(null);
+  // A custom model whose id the API no longer serves. Shown as a hint only:
+  // the id is still sent verbatim because the user configured it on purpose.
+  const isRetiredCustom = currentProvider === 'claude' && !!model.isCustom && isRetiredClaudeModelId(model.id);
+
+  useEffect(() => {
+    if (isHighlighted) {
+      rowRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isHighlighted]);
 
   return (
     <div
-      className={`selector-option ${isSelected ? 'selected' : ''}`}
+      ref={rowRef}
+      className={`selector-option ${isSelected ? 'selected' : ''} ${isHighlighted ? 'keyboard-highlighted' : ''}`}
+      role="button"
+      tabIndex={0}
       onClick={() => onSelect(model.id)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          onSelect(model.id);
+        }
+      }}
       data-testid={`model-option-${model.id}`}
     >
       <ProviderModelIcon
@@ -57,6 +81,17 @@ export const ModelOptionRow = ({
           <span className="model-description" style={MODEL_TEXT_STYLE}>{description}</span>
         )}
       </div>
+      {isRetiredCustom && (
+        <span
+          className="model-retired-badge"
+          data-testid={`model-retired-${model.id}`}
+          title={t('models.retiredCustomHint', {
+            defaultValue: 'This model id is no longer served by the API. It is sent as-is because you added it as a custom model.',
+          })}
+        >
+          {t('models.retiredBadge', { defaultValue: 'Retired' })}
+        </span>
+      )}
       <button
         type="button"
         className={`model-pin-button ${isPinned ? 'is-pinned' : ''}`}

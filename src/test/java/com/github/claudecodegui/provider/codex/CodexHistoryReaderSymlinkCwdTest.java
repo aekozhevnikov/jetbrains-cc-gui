@@ -51,7 +51,9 @@ public class CodexHistoryReaderSymlinkCwdTest {
 
     @Test
     public void matchesSessionsRecordedUnderPhysicalCwdWhenQueriedViaSymlink() throws IOException {
-        Path realDir = Files.createTempDirectory("codex-symlink-real");
+        // The CLI records the physical cwd; on macOS the temp dir's /var is itself
+        // a symlink to /private/var, so the physical form is the real path.
+        Path realDir = Files.createTempDirectory("codex-symlink-real").toRealPath();
         Path linkPath = Paths.get(realDir + "-link");
         try {
             boolean linkCreated;

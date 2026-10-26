@@ -17,6 +17,7 @@ import {
 } from '../../../components/ChatInputBox/types';
 import { drainPendingSettings, startInitialSettingsRequest } from '../settingsBootstrap';
 import { clampPermissionDialogTimeoutSeconds } from '../../../utils/permissionDialogTimeout';
+import { readCustomClaudeModelIds } from '../../../utils/customClaudeModels';
 import { normalizeCliPermissionMode } from '../../providers/cliProviders';
 
 export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): void {
@@ -92,8 +93,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
       ? canonicalMode
       : normalizeCliPermissionMode(modeForProvider ?? 'default', activeProvider);
     if (isValidPermissionMode(normalizedMode)) {
-      const nextMode: PermissionMode =
-        activeProvider === 'codex' && normalizedMode === 'plan' ? 'default' : normalizedMode;
+      const nextMode: PermissionMode = normalizedMode;
       setPermissionMode((prev) => (prev === nextMode ? prev : nextMode));
       if (activeProvider === 'codex') {
         setCodexPermissionMode((prev) => (prev === nextMode ? prev : nextMode));
@@ -109,7 +109,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
   window.onModelChanged = (modelId) => {
     const provider = currentProviderRef.current;
     if (provider === 'claude') {
-      setSelectedClaudeModel(normalizeClaudeModelId(modelId));
+      setSelectedClaudeModel(normalizeClaudeModelId(modelId, readCustomClaudeModelIds()));
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     }
@@ -117,7 +117,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
 
   window.onModelConfirmed = (modelId, provider) => {
     if (provider === 'claude') {
-      setSelectedClaudeModel(normalizeClaudeModelId(modelId));
+      setSelectedClaudeModel(normalizeClaudeModelId(modelId, readCustomClaudeModelIds()));
     } else if (provider === 'codex') {
       setSelectedCodexModel(modelId);
     }
@@ -138,7 +138,7 @@ export function registerUsageModeCallbacks(options: UseWindowCallbacksOptions): 
 
       if (typeof state.model === 'string' && state.model.length > 0) {
         if (provider === 'claude') {
-          setSelectedClaudeModel(normalizeClaudeModelId(strip1MContextSuffix(state.model)));
+          setSelectedClaudeModel(normalizeClaudeModelId(strip1MContextSuffix(state.model), readCustomClaudeModelIds()));
           setLongContextEnabled(has1MContextSuffix(state.model));
         } else {
           setSelectedCodexModel(state.model);

@@ -5,6 +5,7 @@ import {
   isMultiActorPath,
   loadFileTouchMap,
   recordFileTouches,
+  subscribeFileTouches,
   wasTouchedOutsideSession,
 } from './fileTouchRegistry';
 
@@ -22,6 +23,7 @@ describe('fileTouchRegistry', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -57,6 +59,67 @@ describe('fileTouchRegistry', () => {
     expect(Object.keys(loadFileTouchMap()).length).toBeGreaterThan(0);
     clearFileTouchRegistry();
     expect(loadFileTouchMap()).toEqual({});
+  });
+
+  it('notifies subscribers of same-window writes and clearing without extra reads', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeFileTouches(listener);
+    try {
+      const reads = vi.spyOn(localStorage, 'getItem');
+      const next = recordFileTouches(['/a'], 'session', new Map());
+      expect(listener).toHaveBeenCalledExactlyOnceWith(next);
+      expect(reads).toHaveBeenCalledTimes(1);
+      clearFileTouchRegistry();
+      expect(listener).toHaveBeenLastCalledWith({});
+      unsubscribe();
+      listener.mockClear();
+      recordFileTouches(['/a'], 'session', new Map());
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('observes other-window storage events only for the registry', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeFileTouches(listener);
+    try {
+      const next = { '/a': [{ sessionId: 'other', agentId: 'main', updatedAt: Date.now() }] };
+      store.set(STORAGE_KEY, JSON.stringify(next));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'unrelated' }));
+      expect(listener).not.toHaveBeenCalled();
+      window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY }));
+      expect(listener).toHaveBeenLastCalledWith(next);
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it('ignores expired actors in an already cached snapshot without storage access', () => {
+    const snapshot = { '/a': [{ sessionId: 'old', agentId: 'main', updatedAt: Date.now() - 25 * 60 * 60 * 1000 }] };
+    const reads = vi.spyOn(localStorage, 'getItem');
+    expect(getDistinctActorsForPath('/a', snapshot)).toEqual([]);
+    expect(wasTouchedOutsideSession('/a', 'current', snapshot)).toBe(false);
+    expect(reads).not.toHaveBeenCalled();
+  });
+
+  it('uses a supplied fresh snapshot without reading again or mutating it', () => {
+    const now = Date.now();
+    const prior = { '/a': [{ sessionId: 'other', agentId: 'main', updatedAt: now }] };
+    const read = vi.spyOn(localStorage, 'getItem');
+    const next = recordFileTouches(['/a'], 'current', new Map([['/a', ['main']]]), now + 1, prior);
+    expect(read).not.toHaveBeenCalled();
+    expect(prior['/a']).toHaveLength(1);
+    expect(next['/a']).toHaveLength(2);
+    expect(next).toEqual(JSON.parse(store.get(STORAGE_KEY)!));
+  });
+
+  it('evaluates TTL using the supplied recording time', () => {
+    const now = Date.now();
+    recordFileTouches(['/a'], 'old', new Map(), now);
+    const future = now + 25 * 60 * 60 * 1000;
+    const next = recordFileTouches(['/a'], 'new', new Map(), future);
+    expect(next['/a'].map((actor) => actor.sessionId)).toEqual(['new']);
   });
 
   it('expires entries older than 24h on read (lazy TTL)', () => {

@@ -1,0 +1,144 @@
+/**
+ * Shared DOM listbox — see ListboxSelect.tsx for why native <select> is banned
+ * in the webview. The metrics deliberately match the native selects these
+ * replaced (14px padding box, bg-tertiary surface, 4px radius).
+ */
+
+.wrap {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+}
+
+.trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover:not(:disabled) {
+    border-color: var(--border-hover);
+  }
+
+  &:focus,
+  &.open {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 1px var(--accent-primary);
+  }
+
+  &:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+}
+
+.value {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.arrow {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  transition: transform 0.15s ease, color 0.15s ease;
+
+  .trigger.open & {
+    color: var(--accent-primary);
+    transform: rotate(180deg);
+  }
+}
+
+.menu {
+  position: absolute;
+  left: 0;
+  z-index: 1000;
+  box-sizing: border-box;
+  min-width: 100%;
+  max-width: 420px;
+  max-height: 280px;
+  padding: 4px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  border: 1px solid var(--border-secondary);
+  border-radius: 4px;
+  background: var(--bg-secondary);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.menuDown {
+  top: calc(100% + 4px);
+}
+
+.menuUp {
+  bottom: calc(100% + 4px);
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover,
+  &:focus {
+    background: var(--bg-tertiary);
+    outline: none;
+  }
+
+  &.selected {
+    background: rgba(33, 150, 243, 0.14);
+    color: var(--accent-primary);
+  }
+
+  .codicon {
+    flex-shrink: 0;
+    font-size: 14px;
+  }
+}
+
+.optionLabel {
+  min-width: 0;
+  /* Diff-theme labels carry a long "— description" suffix; wrap instead of clipping. */
+  white-space: normal;
+}
+
+@media (max-width: 480px) {
+  .trigger {
+    min-height: 30px;
+    padding: 7px 10px;
+    font-size: 12px;
+  }
+
+  .option {
+    font-size: 12px;
+  }
+}

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import styles from './style.module.less';
 import { useTranslation } from 'react-i18next';
 import type { UiFontConfig } from '../hooks/useSettingsBasicActions';
+import ListboxSelect from '../shared/ListboxSelect';
 
 const UI_FONT_SELECT_ID = 'settings-ui-font-select';
 const UI_FONT_CUSTOM_PATH_ID = 'settings-ui-font-custom-path';
@@ -60,8 +61,7 @@ const UiFontSection = ({
         font: uiFontConfig?.fontFamily || currentUiFontDisplayName,
       }));
 
-  const handleUiFontSelectionChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const nextSelection = event.target.value;
+  const handleUiFontSelectionChange = (nextSelection: string) => {
     setSelectedUiFontOption(nextSelection);
 
     if (nextSelection === 'customFile') {
@@ -88,22 +88,24 @@ const UiFontSection = ({
           {t('settings.basic.editorFont.label')}
         </label>
       </div>
-      <select
+      <ListboxSelect
         id={UI_FONT_SELECT_ID}
-        aria-label={t('settings.basic.editorFont.label')}
-        className={styles.languageSelect}
+        ariaLabel={t('settings.basic.editorFont.label')}
         value={selectedUiFontOption}
+        options={[
+          {
+            value: 'followEditor',
+            label: t('settings.basic.editorFont.followOption', { font: uiFontConfig?.fontFamily || '-' }),
+          },
+          {
+            value: 'customFile',
+            label: customFontFileName
+              ? `${t('settings.basic.editorFont.customOption')} / ${customFontFileName}`
+              : t('settings.basic.editorFont.customOption'),
+          },
+        ]}
         onChange={handleUiFontSelectionChange}
-      >
-        <option value="followEditor">
-          {t('settings.basic.editorFont.followOption', { font: uiFontConfig?.fontFamily || '-' })}
-        </option>
-        <option value="customFile">
-          {customFontFileName
-            ? `${t('settings.basic.editorFont.customOption')} / ${customFontFileName}`
-            : t('settings.basic.editorFont.customOption')}
-        </option>
-      </select>
+      />
 
       {isCustomUiFontSelected && (
         <div className={styles.nodePathSection} style={NODE_PATH_SECTION_STYLE}>

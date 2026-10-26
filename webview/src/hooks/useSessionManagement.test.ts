@@ -125,9 +125,11 @@ describe('useSessionManagement', () => {
     });
 
     expect(window.sendToJava).toHaveBeenNthCalledWith(1, 'interrupt_session:');
+    // The payload model is normalized webview-side: the retired sonnet-4-6 is
+    // mapped to its live replacement before Java stores it verbatim.
     expect(window.sendToJava).toHaveBeenNthCalledWith(
       2,
-      'load_session:{"sessionId":"history-1","provider":"claude","model":"claude-sonnet-4-6"}'
+      'load_session:{"sessionId":"history-1","provider":"claude","model":"claude-sonnet-5"}'
     );
     expect(window.__sessionTransitioning).toBe(true);
     expect(window.__sessionTransitionToken).toBeTruthy();
@@ -260,6 +262,40 @@ describe('useSessionManagement', () => {
 
     expect(window.sendToJava).toHaveBeenCalledWith('delete_sessions:["history-1","history-2"]');
     expect(mocks.addToast).toHaveBeenCalledWith('history.sessionDeleted', 'success');
+  });
+
+  it('preserves unknown native totals after deletion and sums the remaining known rows', () => {
+    let historyData: HistoryData = { success: true, source: 'native', sessions: [
+      { sessionId: 'unknown', title: 'Unknown' },
+      { sessionId: 'known', title: 'Known', messageCount: 5 },
+      { sessionId: 'deleted', title: 'Deleted', messageCount: 3 },
+    ] };
+    const mocks = { ...createMocks(), setHistoryData: vi.fn((update: HistoryData | null | ((current: HistoryData | null) => HistoryData | null)) => {
+      historyData = (typeof update === 'function' ? update(historyData) : update) as HistoryData;
+    }) };
+    const { result } = renderHook(() => useSessionManagement({ messages: [], loading: false,
+      historyData, currentSessionId: null, ...mocks, t }));
+    act(() => { result.current.deleteHistorySession('deleted'); });
+    expect(historyData.total).toBeUndefined();
+    act(() => { result.current.deleteHistorySessions(['unknown']); });
+    expect(historyData.total).toBe(5);
+    expect(historyData.sessions?.map(session => session.sessionId)).toEqual(['known']);
+  });
+
+  it('preserves freshly counted messages when editing through callbacks from the preceding render', () => {
+    let historyData: HistoryData = { success: true, source: 'native', sessions: [{ sessionId: 'saved', title: 'Original' }] };
+    const mocks = { ...createMocks(), setHistoryData: vi.fn((update: HistoryData | null | ((current: HistoryData | null) => HistoryData | null)) => {
+      historyData = (typeof update === 'function' ? update(historyData) : update) as HistoryData;
+    }) };
+    const { result } = renderHook(() => useSessionManagement({ messages: [], loading: false,
+      historyData, currentSessionId: null, ...mocks, t }));
+    historyData = { ...historyData, total: 7, sessions: [{ ...historyData.sessions![0], messageCount: 7 }] };
+    act(() => { result.current.toggleFavoriteSession('saved'); });
+    expect(historyData).toMatchObject({ total: 7, sessions: [{ messageCount: 7, isFavorited: true }] });
+    act(() => { result.current.updateHistoryTitle('saved', 'Renamed'); });
+    expect(historyData).toMatchObject({ total: 7, sessions: [{ messageCount: 7, isFavorited: true, title: 'Renamed' }] });
+    act(() => { result.current.applyHistoryTitleLocal('saved', 'Generated'); });
+    expect(historyData).toMatchObject({ total: 7, sessions: [{ messageCount: 7, isFavorited: true, title: 'Generated' }] });
   });
 
   it('defers the deleted toast until transition completion when batch delete removes current session', () => {
@@ -596,8 +632,9 @@ describe('useSessionManagement', () => {
     // Should NOT send interrupt when not loading
     const calls = (window.sendToJava as any).mock.calls.map((c: any) => c[0]);
     expect(calls).not.toContain('interrupt_session:');
+    // The retired sonnet-4-6 is normalized to its live replacement in the payload.
     expect(calls).toContain(
-      'load_session:{"sessionId":"hist-2","provider":"claude","model":"claude-sonnet-4-6"}',
+      'load_session:{"sessionId":"hist-2","provider":"claude","model":"claude-sonnet-5"}',
     );
 
     // But should still set transition guard

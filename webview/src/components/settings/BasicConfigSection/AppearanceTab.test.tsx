@@ -64,9 +64,9 @@ describe('AppearanceTab ui font selector', () => {
 
     renderAppearanceTab();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], {
-      target: { value: '__follow_idea__' },
-    });
+    // The appearance dropdowns are DOM listboxes (native <select> is unusable in JCEF).
+    fireEvent.click(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'settings.basic.language.followIde' }));
 
     expect(sendToJava).toHaveBeenCalledWith('clear_user_language:');
     expect(changeLanguageMock).not.toHaveBeenCalled();
@@ -82,9 +82,8 @@ describe('AppearanceTab ui font selector', () => {
 
     renderAppearanceTab();
 
-    fireEvent.change(screen.getAllByRole('combobox')[0], {
-      target: { value: 'en' },
-    });
+    fireEvent.click(screen.getAllByRole('combobox')[0]);
+    fireEvent.click(screen.getByRole('option', { name: 'settings.basic.language.english' }));
 
     expect(sendToJava).toHaveBeenCalledWith(
       'set_user_language:' + JSON.stringify({ language: 'en' })
@@ -99,8 +98,8 @@ describe('AppearanceTab ui font selector', () => {
     localStorage.setItem('languageSelectionMode', 'manual');
 
     renderAppearanceTab();
-    const select = screen.getAllByRole('combobox')[0] as HTMLSelectElement;
-    expect(select.value).toBe('zh');
+    const select = screen.getAllByRole('combobox')[0];
+    expect(select.textContent).toBe('settings.basic.language.simplifiedChinese');
 
     // Simulate Java pushing the authoritative followIdea state after a failure
     // or external config edit.
@@ -111,7 +110,7 @@ describe('AppearanceTab ui font selector', () => {
       }));
     });
 
-    expect(select.value).toBe('__follow_idea__');
+    expect(select.textContent).toBe('settings.basic.language.followIde');
   });
 
   it('renders only follow-editor and custom options, plus custom path controls for custom mode', () => {
@@ -153,9 +152,10 @@ describe('AppearanceTab ui font selector', () => {
     render(<AppearanceTab {...props} />);
 
     const select = screen.getByRole('combobox', { name: /settings.basic.editorFont.label/i });
-    const options = within(select).getAllByRole('option');
 
     expect(select).toBeTruthy();
+    fireEvent.click(select);
+    const options = screen.getAllByRole('option');
     expect(options).toHaveLength(2);
     expect(screen.getByRole('option', { name: /settings.basic.editorFont.followOption/i })).toBeTruthy();
     expect(screen.getByRole('option', { name: /settings.basic.editorFont.customOption/i })).toBeTruthy();
@@ -205,9 +205,8 @@ describe('AppearanceTab ui font selector', () => {
       />
     );
 
-    fireEvent.change(screen.getByRole('combobox', { name: /settings.basic.editorFont.label/i }), {
-      target: { value: 'customFile' },
-    });
+    fireEvent.click(screen.getByRole('combobox', { name: /settings.basic.editorFont.label/i }));
+    fireEvent.click(screen.getByRole('option', { name: /settings.basic.editorFont.customOption/i }));
 
     expect(onUiFontSelectionChange).toHaveBeenCalledTimes(1);
     expect(onUiFontSelectionChange).toHaveBeenCalledWith('customFile');

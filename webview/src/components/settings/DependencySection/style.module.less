@@ -82,6 +82,44 @@
   margin-bottom: 24px;
 }
 
+/* Codex 已不再以 SDK 依赖形式出现，迁移到「供应商管理 → CLI」的本地 CLI 检测。
+   这里放一条常驻说明，避免用户误以为 Codex 的安装入口消失了。 */
+.sdkMigrationNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border-secondary);
+  border-radius: 8px;
+
+  :global(.codicon) {
+    margin-top: 1px;
+    font-size: 14px;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+}
+
+.migrationBody {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.migrationTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.migrationDesc {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-tertiary);
+}
+
 .loadingState {
   display: flex;
   align-items: center;

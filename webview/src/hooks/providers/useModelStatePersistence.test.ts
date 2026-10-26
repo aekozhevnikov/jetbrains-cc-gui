@@ -108,6 +108,18 @@ describe('useModelStatePersistence — boot sync does not clobber the persisted 
     expect(bridgeEventsFor('set_codex_fast_mode')).toHaveLength(1);
   });
 
+  it('restores a cc-switch route without assuming 1M before the picker has loaded', () => {
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'claude', claudeModel: 'ccs-claude-provider-b--glm-5.3[1M]', longContextEnabled: true,
+    }));
+    const setSelectedClaudeModel = vi.fn();
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('ccs-claude-provider-b--glm-5.3');
+    vi.advanceTimersByTime(200);
+    expect(bridgeEventsFor('set_model')[0]).toContain('ccs-claude-provider-b--glm-5.3');
+    expect(bridgeEventsFor('set_model')[0]).not.toContain('ccs-claude-provider-b--glm-5.3[1m]');
+  });
+
   it('migrates a legacy autoEdit mode to acceptEdits during restore', () => {
     localStorage.setItem('model-selection-state', JSON.stringify({
       provider: 'claude',
@@ -240,6 +252,27 @@ describe('useModelStatePersistence — retired model migration', () => {
     expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-sonnet-5');
     expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-fable-5');
     expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-sonnet-5']]);
+  });
+
+  it('restores a saved custom model verbatim even when its id is in the retired table', () => {
+    // The user added claude-opus-4-8 as a custom model on purpose. Restoring it
+    // must not rewrite it to opus-5 the way a stale built-in id would be.
+    const setSelectedClaudeModel = vi.fn();
+    localStorage.setItem('claude-custom-models', JSON.stringify([
+      { id: 'claude-opus-4-8', label: 'My Opus 4.8' },
+    ]));
+    localStorage.setItem('model-selection-state', JSON.stringify({
+      provider: 'claude',
+      claudeModel: 'claude-opus-4-8',
+      longContextEnabled: true,
+    }));
+
+    renderHook(() => useModelStatePersistence(makeOptions({ setSelectedClaudeModel })));
+    vi.advanceTimersByTime(200);
+
+    expect(setSelectedClaudeModel).toHaveBeenCalledWith('claude-opus-4-8');
+    expect(setSelectedClaudeModel).not.toHaveBeenCalledWith('claude-opus-5');
+    expect(bridgeEventsFor('set_model')).toEqual([['set_model', 'claude-opus-4-8[1m]']]);
   });
 
   it('migrates a backend-supplied retired model via __INITIAL_TAB_MODEL__', () => {

@@ -1,12 +1,10 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { perfTimer } from '../../../utils/debug.js';
 import { makeQuoteToken } from '../utils/quoteRegistry.js';
 
 interface TextContentCache {
   content: string;
-  htmlSnapshot: string;
-  valid: boolean;
-  timestamp: number;
+  version: number;
 }
 
 interface UseTextContentOptions {
@@ -25,7 +23,7 @@ interface UseTextContentReturn {
  *
  * Performance optimization:
  * - Uses cache to avoid repeated DOM traversal
- * - Cache is invalidated when the exact innerHTML snapshot changes
+ * - Uses explicit invalidation and DOM mutation versions without HTML snapshots
  * - Properly handles file tags by reading data-file-path attribute
  */
 export function useTextContent({
@@ -33,16 +31,30 @@ export function useTextContent({
 }: UseTextContentOptions): UseTextContentReturn {
   const textCacheRef = useRef<TextContentCache>({
     content: '',
-    htmlSnapshot: '',
-    valid: false,
-    timestamp: 0,
+    version: -1,
   });
+  const contentVersionRef = useRef(0);
+  const observedElementRef = useRef<HTMLDivElement | null>(null);
+  const observerRef = useRef<MutationObserver | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      observedElementRef.current = null;
+      textCacheRef.current = { content: '', version: -1 };
+    };
+  }, []);
 
   /**
    * Invalidate cache to force fresh content read
    */
   const invalidateCache = useCallback(() => {
-    textCacheRef.current = { content: '', htmlSnapshot: '', valid: false, timestamp: 0 };
+    observerRef.current?.takeRecords();
+    contentVersionRef.current += 1;
   }, []);
 
   /**
@@ -55,17 +67,36 @@ export function useTextContent({
    */
   const getTextContent = useCallback((): string => {
     const timer = perfTimer('getTextContent');
-    if (!editableRef.current) return '';
-
-    // Performance optimization: Check cache validity
-    // Comparing only innerHTML.length allows different DOM states with the same
-    // size to reuse stale text. File icon SVG sizes make that collision depend
-    // on the referenced extension, which is especially confusing for users.
-    const currentHtml = editableRef.current.innerHTML;
+    const editable = editableRef.current;
+    if (observedElementRef.current !== editable) {
+      observerRef.current?.disconnect();
+      observerRef.current = null;
+      observedElementRef.current = isMountedRef.current ? editable : null;
+      invalidateCache();
+      if (editable && isMountedRef.current) {
+        observerRef.current = new MutationObserver((records) => {
+          if (records.length > 0) contentVersionRef.current += 1;
+        });
+        observerRef.current.observe(editable, {
+          subtree: true,
+          childList: true,
+          characterData: true,
+          attributes: true,
+          attributeFilter: ['class', 'data-file-path', 'data-quote-id'],
+        });
+      }
+    }
+    if (!editable) {
+      textCacheRef.current = { content: '', version: -1 };
+      timer.end();
+      return '';
+    }
+    if (observerRef.current?.takeRecords().length) {
+      contentVersionRef.current += 1;
+    }
     const cache = textCacheRef.current;
 
-    // Return cached content only when the exact DOM snapshot is unchanged.
-    if (cache.valid && currentHtml === cache.htmlSnapshot) {
+    if (cache.version === contentVersionRef.current) {
       timer.mark('cache-hit');
       timer.end();
       return cache.content;
@@ -117,7 +148,7 @@ export function useTextContent({
       }
     };
 
-    editableRef.current.childNodes.forEach(walk);
+    editable.childNodes.forEach(walk);
     timer.mark('dom-walk');
 
     // Join all parts into final text
@@ -126,8 +157,8 @@ export function useTextContent({
 
     // Only remove trailing newline that JCEF might add (not user-entered newlines)
     // If there are multiple trailing newlines, only remove the last one (JCEF added)
-    if (text.endsWith('\n') && editableRef.current.childNodes.length > 0) {
-      const lastChild = editableRef.current.lastChild;
+    if (text.endsWith('\n') && editable.childNodes.length > 0) {
+      const lastChild = editable.lastChild;
       // Only remove if last node is not a br tag (meaning it's JCEF added)
       if (
         lastChild?.nodeType !== Node.ELEMENT_NODE ||
@@ -140,14 +171,12 @@ export function useTextContent({
     // Update cache
     textCacheRef.current = {
       content: text,
-      htmlSnapshot: currentHtml,
-      valid: true,
-      timestamp: Date.now(),
+      version: contentVersionRef.current,
     };
 
     timer.end();
     return text;
-  }, [editableRef]);
+  }, [editableRef, invalidateCache]);
 
   return {
     getTextContent,

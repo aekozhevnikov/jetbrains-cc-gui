@@ -7,7 +7,7 @@
  * The webview has no reliable per-project identifier at this layer, so the
  * registry is global; to stop stale cross-project / ancient history from
  * permanently flipping Write status A→M or lighting multi-agent badges,
- * entries expire after ENTRY_TTL_MS and are lazily pruned on read.
+ * entries expire after FILE_TOUCH_TTL_MS and are lazily pruned on read.
  */
 
 export interface FileTouchActor {
@@ -21,10 +21,11 @@ export interface FileTouchActor {
 export type FileTouchMap = Record<string, FileTouchActor[]>;
 
 const STORAGE_KEY = 'ccgui-file-touch-registry-v1';
+const CHANGE_EVENT = 'ccgui-file-touch-registry-changed';
 const MAX_ACTORS_PER_FILE = 12;
 const MAX_FILES = 400;
 /** Entries older than this are stale and lazily dropped on read. */
-const ENTRY_TTL_MS = 24 * 60 * 60 * 1000;
+export const FILE_TOUCH_TTL_MS = 24 * 60 * 60 * 1000;
 
 function actorKey(a: Pick<FileTouchActor, 'sessionId' | 'agentId'>): string {
   return `${a.sessionId}::${a.agentId || 'main'}`;
@@ -40,7 +41,7 @@ function pruneExpired(map: FileTouchMap, now: number): { pruned: FileTouchMap; c
       continue;
     }
     const fresh = actors.filter(
-      (a) => a && typeof a.updatedAt === 'number' && now - a.updatedAt <= ENTRY_TTL_MS,
+      (a) => a && typeof a.updatedAt === 'number' && now - a.updatedAt <= FILE_TOUCH_TTL_MS,
     );
     if (fresh.length !== actors.length) changed = true;
     if (fresh.length > 0) {
@@ -71,6 +72,20 @@ export function saveFileTouchMap(map: FileTouchMap): void {
   } catch {
     // quota / private mode
   }
+  window.dispatchEvent(new CustomEvent<FileTouchMap>(CHANGE_EVENT, { detail: map }));
+}
+
+export function subscribeFileTouches(listener: (map: FileTouchMap) => void): () => void {
+  const onChange = (event: Event) => listener((event as CustomEvent<FileTouchMap>).detail);
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY || event.key === null) listener(loadFileTouchMap());
+  };
+  window.addEventListener(CHANGE_EVENT, onChange);
+  window.addEventListener('storage', onStorage);
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, onChange);
+    window.removeEventListener('storage', onStorage);
+  };
 }
 
 /**
@@ -82,12 +97,13 @@ export function recordFileTouches(
   sessionId: string,
   agentIdsByPath: Map<string, string[]>,
   now = Date.now(),
+  priorMap?: FileTouchMap,
 ): FileTouchMap {
   if (!sessionId || paths.length === 0) {
-    return loadFileTouchMap();
+    return priorMap ?? loadFileTouchMap(now);
   }
 
-  const map = loadFileTouchMap();
+  const map = { ...(priorMap ?? loadFileTouchMap(now)) };
 
   for (const filePath of paths) {
     if (!filePath) continue;
@@ -133,7 +149,9 @@ export function getDistinctActorsForPath(filePath: string, map?: FileTouchMap): 
   const list = source[filePath] ?? [];
   const seen = new Set<string>();
   const out: FileTouchActor[] = [];
+  const now = Date.now();
   for (const a of list) {
+    if (now - a.updatedAt > FILE_TOUCH_TTL_MS) continue;
     const k = actorKey(a);
     if (seen.has(k)) continue;
     seen.add(k);
@@ -175,4 +193,5 @@ export function clearFileTouchRegistry(): void {
   } catch {
     // ignore
   }
+  window.dispatchEvent(new CustomEvent<FileTouchMap>(CHANGE_EVENT, { detail: {} }));
 }

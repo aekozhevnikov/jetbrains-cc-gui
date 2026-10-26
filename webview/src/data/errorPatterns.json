@@ -1,6 +1,13 @@
 {
   "patterns": [
     {
+      "code": "codexWriterConflict",
+      "match": {
+        "regex": "already has an active writer"
+      },
+      "solutions": []
+    },
+    {
       "code": "codexThreadResume",
       "match": {
         "regex": "thread/resume"
@@ -71,6 +78,39 @@
             {
               "kind": "navigation",
               "action": "openDependencySettings"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "code": "codexCliUnavailable",
+      "match": {
+        "regex": "codex app-server exited \\(code=",
+        "keywordsAll": ["Codex CLI check"]
+      },
+      "solutions": [
+        {
+          "key": "reinstallCodexCli",
+          "recommended": true,
+          "steps": [
+            {
+              "kind": "link",
+              "url": "https://learn.chatgpt.com/docs/codex/cli#getting-started"
+            },
+            {
+              "kind": "command",
+              "command": "codex --version"
+            }
+          ]
+        },
+        {
+          "key": "pointCodexBin",
+          "recommended": false,
+          "steps": [
+            {
+              "kind": "command",
+              "command": "which -a codex"
             }
           ]
         }

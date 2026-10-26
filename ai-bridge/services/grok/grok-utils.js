@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
+import { resolveCliSpawn } from '../../utils/cli-path.js';
 
 export function resolveGrokBinary() {
   const explicit = process.env.GROK_CLI_PATH;
@@ -26,6 +27,38 @@ export function resolveGrokBinary() {
 
   // Fall back to PATH
   return explicit || 'grok';
+}
+
+/**
+ * argv for `grok agent stdio`.
+ * Windows CreateProcess cannot execute a node script (EFTYPE). A GROK_CLI_PATH
+ * that points at one has to be launched through node.exe. npm `.cmd`/`.bat`
+ * shims cannot be spawned directly either (CVE-2024-27980) — they go through
+ * `cmd.exe /d /s /c` like every other CLI provider in this repo.
+ * @param {string} bin
+ * @param {NodeJS.Platform} [platform]
+ * @param {NodeJS.ProcessEnv} [env] - base env for the shim launch (its directory
+ *   is prepended to PATH so the shim can be invoked by basename)
+ */
+export function resolveGrokAgentLaunch(bin, platform = process.platform, env = process.env) {
+  const agentArgs = ['agent', 'stdio'];
+  if (platform === 'win32' && /\.(?:mjs|cjs|js)$/i.test(String(bin || ''))) {
+    return {
+      file: process.execPath,
+      args: [bin, ...agentArgs],
+      windowsHide: true,
+    };
+  }
+  if (platform === 'win32' && /\.(?:cmd|bat)$/i.test(String(bin || ''))) {
+    const invocation = resolveCliSpawn(bin, agentArgs, { env, windowsHide: true }, true);
+    return {
+      file: invocation.file,
+      args: invocation.args,
+      windowsHide: true,
+      options: invocation.options,
+    };
+  }
+  return { file: bin, args: agentArgs, windowsHide: false };
 }
 
 /**
