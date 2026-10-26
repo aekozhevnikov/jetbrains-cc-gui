@@ -93,6 +93,7 @@ public class ModelProviderHandlerTest {
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("gpt-5.4"));
         assertEquals(258_000, ModelProviderHandler.getModelContextLimit("gpt-5.2-codex"));
         // GPT-6 Sol / Luna are the 1.05M-context successors of the GPT-5.6 entries.
+        assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6.1-sol"));
         assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6-sol"));
         assertEquals(1_050_000, ModelProviderHandler.getModelContextLimit("gpt-6-luna"));
     }
@@ -104,11 +105,14 @@ public class ModelProviderHandlerTest {
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5-5[1m]"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-opus-5[1m]"));
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5-5"));
+        assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5-5[1m]"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5"));
         assertTrue(ModelProviderHandler.MODEL_CONTEXT_LIMITS.containsKey("claude-sonnet-5[1m]"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-5-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-opus-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-fable-5"));
+        assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-7"));
         assertEquals(200_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-6"));
@@ -118,6 +122,7 @@ public class ModelProviderHandlerTest {
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-opus-5-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-opus-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-fable-5[1m]"));
+        assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-5[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-7[1m]"));
         assertEquals(1_000_000, ModelProviderHandler.getModelContextLimit("claude-sonnet-4-6[1m]"));

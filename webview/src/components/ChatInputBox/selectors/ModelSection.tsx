@@ -13,6 +13,7 @@ interface ModelSectionProps {
   isSelectedModel: (modelId: string) => boolean;
   getModelLabel: (model: ModelInfo, show1MContext?: boolean) => string;
   getModelDescription: (model: ModelInfo) => string | undefined;
+  highlightedModelId: string | null;
   onSelect: (modelId: string) => void;
   onTogglePin: (e: React.MouseEvent, modelId: string) => void;
 }
@@ -29,6 +30,7 @@ export const ModelSection = ({
   isSelectedModel,
   getModelLabel,
   getModelDescription,
+  highlightedModelId,
   onSelect,
   onTogglePin,
 }: ModelSectionProps) => {
@@ -61,6 +63,7 @@ export const ModelSection = ({
           isPinned={pinnedIds.has(model.id)}
           label={getModelLabel(model, false)}
           description={getModelDescription(model)}
+          isHighlighted={model.id === highlightedModelId}
           onSelect={onSelect}
           onTogglePin={onTogglePin}
         />

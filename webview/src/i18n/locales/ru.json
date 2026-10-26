@@ -82,6 +82,7 @@
     "disabled": "Отключено",
     "sdkNotInstalled": "SDK {{provider}} не установлен. Установите SDK для начала работы.",
     "sdkStatusLoading": "Проверка статуса SDK...",
+    "pasteImagePreparing": "Подготовка вставленного изображения...",
     "sdkStatusUnavailable": "Не удалось проверить состояние SDK.",
     "retrySdkStatus": "Повторить",
     "openSourceBanner": "Этот проект гарантированно 100% с открытым исходным кодом и бесплатный (остерегайтесь пиратских проектов)",
@@ -119,6 +120,7 @@
       "openTooltip": "Поиск в беседе (Cmd/Ctrl+F)"
     },
     "compactSummary": {
+      "receivedTime": "Время записи",
       "summarizedConversation": "Сводка беседы",
       "compactSummary": "Краткое резюме",
       "messagesUpTo": "Сведено {{count}} сообщений до этого момента",
@@ -126,7 +128,7 @@
       "userContext": "Контекст: «{{context}}»",
       "expand": "Развернуть сводку",
       "collapse": "Свернуть сводку",
-      "receivedTime": "Время записи",
+"receivedTime": "Время записи",
       "nativeCompleted": "Контекст сжат",
       "nativeInProgress": "Сжатие контекста",
       "nativeFailed": "Ошибка сжатия",
@@ -137,8 +139,8 @@
       "timeUnknown": "Время неизвестно",
       "turnTime": "Начало хода"
     },
-    "pasteImagePreparing": "Подготовка вставленного изображения...",
-    "codexCompactUsage": "Use /compact without arguments",
+"pasteImagePreparing": "Подготовка вставленного изображения...",
+"codexCompactUsage": "Use /compact without arguments",
     "codexCompactStarted": "Codex is compacting the conversation",
     "codexReviewUsage": "Use /review without arguments",
     "codexReviewStarted": "Codex is reviewing the workspace",
@@ -418,8 +420,8 @@
       "installPolicyTip": "Проблемы с установкой? Скопируйте ошибку в терминальный CLI AI для решения",
       "claudeSdkName": "Claude Code SDK",
       "claudeSdkDescription": "Необходим для функций Claude AI. Включает Claude Code SDK и связанные зависимости.",
-      "codexSdkName": "Codex SDK",
-      "codexSdkDescription": "Необходим для функций Codex AI. Включает OpenAI Codex SDK.",
+      "codexMigratedTitle": "Codex переехал в «Управление провайдерами → CLI»",
+      "codexMigratedDesc": "Codex больше не устанавливает SDK здесь: он использует уже установленный на компьютере Codex CLI (@openai/codex), а чат работает через официальный app-server. Проверьте состояние в разделе «Управление провайдерами → CLI». Если он не установлен, выполните в терминале npm install -g @openai/codex и нажмите Re-check на этой странице.",
       "loading": "Загрузка статуса зависимостей...",
       "install": "Установить",
       "installing": "Установка...",
@@ -436,7 +438,7 @@
       "uninstallFailed": "Ошибка удаления: {{error}}",
       "updating": "Обновление...",
       "updateSuccess": "{{name}} успешно обновлён",
-      "codexMigratedTitle": "Codex переехал в «Управление провайдерами → CLI»",
+"codexMigratedTitle": "Codex переехал в «Управление провайдерами → CLI»",
       "codexMigratedDesc": "Codex больше не устанавливает SDK здесь: он использует уже установленный на компьютере Codex CLI (@openai/codex), а чат работает через официальный app-server. Проверьте состояние в разделе «Управление провайдерами → CLI». Если он не установлен, выполните в терминале npm install -g @openai/codex и нажмите Re-check на этой странице.",
       "cliTransportBadge": "CLI · {{transport}}"
     },
@@ -891,6 +893,10 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "codex": {
+          "name": "Codex CLI",
+          "description": "Обнаруживает установленный Codex CLI. Проверка версии не читает настройки аккаунта; чат использует app-server."
+        },
         "minimax": {
           "name": "MiniMax Code",
           "description": "Терминальный кодинг-агент MiniMax. Требуется Node.js 22.19+ / 24+ (не 23); команды: minimax / mcode"
@@ -989,7 +995,9 @@
     "noSessions": "Нет чатов в истории",
     "noSessionsDesc": "В текущем проекте не найдено записей сессий",
     "totalSessions": "{{count}} чатов · {{total}} сообщений",
+    "totalSessionsOnly": "{{count}} чатов",
     "messageCount": "{{count}} сообщений",
+    "messageCountUnknown": "Количество сообщений неизвестно",
     "searchPlaceholder": "Поиск по чатам...",
     "noSearchResults": "Чаты не найдены",
     "tryOtherKeywords": "Попробуйте другие ключевые слова",
@@ -1060,11 +1068,11 @@
       "claude-vscode": "Этот сеанс был создан расширением VS Code и по умолчанию не отображается в CLI. Нажмите 'Преобразовать в CLI', чтобы он появился в списке /resume терминала CLI",
       "remote": "Этот сеанс был создан удаленным экземпляром Claude Code"
     },
-    "convertActiveHint": "Конвертация в CLI после завершения сессии",
+"convertActiveHint": "Конвертация в CLI после завершения сессии",
     "convertActiveHintTooltip": "Сначала завершите или закройте сессию, затем конвертируйте её из списка истории",
     "totalSessionsOnly": "{{count}} чатов",
     "messageCountUnknown": "Количество сообщений неизвестно",
-    "loadMore": "Load more"
+"loadMore": "Load more"
   },
   "permission": {
     "dialogTitle": "Запрос разрешения",
@@ -1152,6 +1160,19 @@
       "loading": "Загрузка провайдеров...",
       "empty": "Нет доступных провайдеров",
       "switched": "Переключено на {{provider}}"
+    },
+    "codexQuota": {
+      "title": "Квота Codex",
+      "loading": "Загрузка квоты...",
+      "unavailable": "Квота недоступна",
+      "lastUpdated": "Обновлено {{value}}",
+      "fiveHour": "Использование за 5 ч",
+      "weekly": "Недельное использование",
+      "windowRemainingPercent": "Осталось {{percent}}%",
+      "windowRemainingPercentWithReset": "Осталось {{percent}}% · Сброс {{value}}",
+      "windowUsedOnly": "Использовано {{used}}",
+      "windowUnavailable": "Недоступно",
+      "apiKeyMode": "В режиме API-ключа квота подписки отсутствует"
     },
     "nodeProcesses": {
       "title": "Менеджер процессов Node",
@@ -1428,6 +1449,20 @@
   "tools": {
     "toolCall": "Вызываю инструмент",
     "runCommand": "Выполняю команду",
+    "commandRead": "Прочитать {{path}}",
+    "commandList": "Список {{path}}",
+    "commandSearch": "Найти {{query}} в {{path}}",
+    "commandApprovalReason": "Причина одобрения",
+    "patchToggleDiff": "Показать изменения",
+    "errorOutput": "Подробности ошибки",
+    "resultUnknown": "Отдельный результат инструмента недоступен",
+    "patchNoDiff": "Разница недоступна",
+    "patchKind": {
+      "add": "Добавлен",
+      "delete": "Удалён",
+      "update": "Изменён",
+      "move": "Перемещён"
+    },
     "contextEngine": "Анализирую контекст",
     "task": "Выполняю задачу",
     "readFile": "Читаю файл",
@@ -1704,7 +1739,9 @@
   "models": {
     "addModel": "Добавить модель",
     "searchPlaceholder": "Поиск моделей",
+    "clearSearch": "Очистить поиск",
     "noModelsFound": "Модели не найдены",
+    "noSearchMatches": "Нет моделей, соответствующих «{{query}}»",
     "hiddenModelCount": "+ {{count}} дополнительных моделей. Введите текст для поиска.",
     "pinned": "Закреплённые",
     "pin": "Закрепить",
@@ -1719,6 +1756,10 @@
       "sonnet5": {
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Модель по умолчанию"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Последнее обновление Sonnet"
       },
       "opus55": {
         "label": "Opus 5.5",
@@ -1759,6 +1800,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "Флагман нового поколения для автономной работы с компьютером и длительных агентных задач."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "Передовая модель GPT-6.1 для сложной профессиональной работы."
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
@@ -1825,6 +1870,22 @@
       "description": "Полностью автоматический, пропускает все проверки разрешений [Используйте с осторожностью]"
     }
   },
+  "workspaceDiff": {
+    "title": "Изменения рабочей области",
+    "staged": "В индексе",
+    "unstaged": "Не в индексе",
+    "untracked": "Не отслеживаемые",
+    "noChanges": "Изменения не обнаружены",
+    "binary": "Бинарный",
+    "truncated": "Снимок рабочей области был слишком большим и был усечён",
+    "notGit": "Текущий каталог не является рабочим деревом Git",
+    "refresh": "Обновить",
+    "fileCount": "{{count}} файлов",
+    "fileCount_one": "{{count}} файл",
+    "fileCount_few": "{{count}} файла",
+    "fileCount_many": "{{count}} файлов",
+    "fileCount_other": "{{count}} файла"
+  },
   "codexModes": {
     "default": {
       "label": "Предложение (одобрение)",
@@ -1833,8 +1894,8 @@
     },
     "plan": {
       "label": "Режим планирования",
-      "tooltip": "Режим планирования — только чтение",
-      "description": "Использует только инструменты чтения, генерирует план для утверждения"
+      "tooltip": "Нативный режим совместного планирования",
+      "description": "Создаёт нативный план перед реализацией; песочница и подтверждения остаются независимыми"
     },
     "acceptEdits": {
       "label": "Авто-правки",
@@ -2039,8 +2100,8 @@
     "recommended": "Рекомендуется",
     "codexWriterConflict": {
       "title": "Поток Codex занят",
-      "intro": "Когда начался новый ход, процесс Codex предыдущего хода ещё записывал данные в этот поток. Плагин теперь автоматически останавливает предыдущий ход перед отправкой.",
-      "reason": "Подождите несколько секунд и отправьте сообщение повторно — создавать новую сессию не нужно."
+      "intro": "Другой ход или клиент Codex записывает данные в эту беседу. Не удалось начать отправку.",
+      "reason": "Остановите ход в клиенте, использующем эту беседу, и отправьте сообщение снова после его завершения."
     },
     "codexThreadResume": {
       "title": "Поток сеанса больше не действителен",

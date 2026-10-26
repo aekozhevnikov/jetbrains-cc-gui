@@ -1,6 +1,8 @@
 import type { MouseEvent } from 'react';
 import type { TFunction } from 'i18next';
 import type { PaceColor } from '../../utils/planUsagePace';
+import { PlanUsageTooltip } from './PlanUsageTooltip';
+import { formatPlanUsagePercent } from './planUsageView';
 
 interface PlanUsageBarProps {
   tooltip: string;
@@ -9,12 +11,11 @@ interface PlanUsageBarProps {
   canSwitch: boolean;
   winLabel: string;
   onCycleWindow: (e: MouseEvent) => void;
-  shortReset: string;
   worstColor: PaceColor;
   t: TFunction;
 }
 
-/** Present view: mini progress bar + % + window switcher + short reset + worst dot. */
+/** Compact summary: mini progress bar + % + window switcher + worst dot. */
 export const PlanUsageBar = ({
   tooltip,
   color,
@@ -22,19 +23,16 @@ export const PlanUsageBar = ({
   canSwitch,
   winLabel,
   onCycleWindow,
-  shortReset,
   worstColor,
   t,
 }: PlanUsageBarProps) => {
   const fillWidth = `${tp}%`;
-  const rounded = Math.round(tp);
-  const labelPct = tp > 0 && rounded === 0 ? '<1%' : `${rounded}%`;
+  const labelPct = formatPlanUsagePercent(tp);
 
   return (
-    <div
-      className={`plan-usage pace-${color} has-tooltip`}
-      data-tooltip={tooltip}
-      aria-label={tooltip}
+    <PlanUsageTooltip
+      className={`plan-usage pace-${color}`}
+      tooltip={tooltip}
     >
       <div className="plan-usage-bar" aria-hidden>
         <div className="plan-usage-fill" style={{ width: fillWidth }} />
@@ -46,7 +44,7 @@ export const PlanUsageBar = ({
           className={`plan-usage-window${canSwitch ? ' switchable' : ''}`}
           onClick={onCycleWindow}
           disabled={!canSwitch}
-          title={
+          aria-label={
             canSwitch
               ? t('chat.planUsage.clickToSwitch', {
                 defaultValue: 'Click to switch between windows',
@@ -57,22 +55,11 @@ export const PlanUsageBar = ({
           {winLabel}
         </button>
       ) : null}
-      {shortReset ? (
-        <span className="plan-usage-reset">{shortReset}</span>
-      ) : null}
-      {/* Worst pace across all windows — after reset date */}
+      {/* Worst pace across all windows. Details are in the shared tooltip. */}
       <span
         className={`plan-usage-worst-dot pace-${worstColor}`}
         aria-hidden
-        title={
-          worstColor !== 'neutral'
-            ? t('chat.planUsage.worstDot', {
-              color: worstColor,
-              defaultValue: 'Worst window: {{color}}',
-            })
-            : undefined
-        }
       />
-    </div>
+    </PlanUsageTooltip>
   );
 };

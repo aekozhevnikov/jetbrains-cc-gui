@@ -82,6 +82,7 @@
     "disabled": "已停用",
     "sdkNotInstalled": "{{provider}} SDK 尚未安裝，請先安裝 SDK 才能開始對話",
     "sdkStatusLoading": "Checking SDK status...",
+    "pasteImagePreparing": "正在準備貼上的圖片...",
     "sdkStatusUnavailable": "無法檢查 SDK 狀態。",
     "retrySdkStatus": "重試",
     "openSourceBanner": "本專案保證100%開源和免費（謹防盜版項目）",
@@ -119,6 +120,7 @@
       "openTooltip": "在對話中搜尋 (Cmd/Ctrl+F)"
     },
     "compactSummary": {
+      "receivedTime": "記錄時間",
       "summarizedConversation": "已總結的對話",
       "compactSummary": "對話摘要",
       "messagesUpTo": "已總結此節點之前的 {{count}} 則訊息",
@@ -126,7 +128,7 @@
       "userContext": "補充說明：「{{context}}」",
       "expand": "展開摘要",
       "collapse": "摺疊摘要",
-      "receivedTime": "記錄時間",
+"receivedTime": "記錄時間",
       "nativeCompleted": "上下文已壓縮",
       "nativeInProgress": "正在壓縮上下文",
       "nativeFailed": "上下文壓縮失敗",
@@ -137,8 +139,8 @@
       "timeUnknown": "時間未知",
       "turnTime": "回合開始時間"
     },
-    "pasteImagePreparing": "正在準備貼上的圖片...",
-    "codexCompactUsage": "請直接使用 /compact，無需參數",
+"pasteImagePreparing": "正在準備貼上的圖片...",
+"codexCompactUsage": "請直接使用 /compact，無需參數",
     "codexCompactStarted": "Codex 正在壓縮會話上下文",
     "codexReviewUsage": "請直接使用 /review，無需參數",
     "codexReviewStarted": "Codex 正在審查工作區變更",
@@ -268,6 +270,18 @@
         "modeManual": "手動",
         "autoSummary": "自動跟隨目前聊天 CLI · 現在解析為 {{provider}}",
         "autoUnavailable": "目前沒有可用的 CLI，請切換到手動並選擇。"
+      },
+      "bashGroupCollapsed": {
+        "label": "預設收起批次執行命令",
+        "enabled": "已開啟",
+        "disabled": "已關閉",
+        "hint": "適用於所有 CLI 的批次執行命令群組。開啟後預設僅顯示標題和執行狀態，點擊標題可展開命令清單；關閉後預設展開。設定立即生效，已手動展開或收起的群組維持原狀態。"
+      },
+      "editGroupCollapsed": {
+        "label": "預設收起批次編輯檔案",
+        "enabled": "已開啟",
+        "disabled": "已關閉",
+        "hint": "適用於所有 CLI 的批次編輯檔案群組。開啟後預設顯示標題、編輯次數、增刪行數和執行狀態，點擊標題可展開檔案清單；關閉後預設展開。同一檔案的多次編輯會分別計數。設定立即生效，已手動展開或收起的群組維持原狀態。「預設展開差異」僅控制單項編輯的行內差異，不影響批次群組的展開狀態。"
       },
       "diffExpanded": {
         "label": "預設展開差異",
@@ -430,8 +444,8 @@
       "installPolicyTip": "安裝遇到問題？可將報錯複製給終端CLI AI 解決",
       "claudeSdkName": "Claude Code SDK",
       "claudeSdkDescription": "Claude AI 功能所需。包含 Claude Code SDK 及相關依賴。",
-      "codexSdkName": "Codex SDK",
-      "codexSdkDescription": "Codex AI 功能所需。包含 OpenAI Codex SDK。",
+      "codexMigratedTitle": "Codex 已遷移到「供應商管理 → CLI」",
+      "codexMigratedDesc": "Codex 不再從這裡安裝 SDK，改為直接使用你電腦上已裝好的 Codex CLI（@openai/codex），聊天透過官方 app-server 執行。請在「供應商管理 → CLI」查看偵測狀態；如果還沒安裝，先在終端執行 npm install -g @openai/codex，再回到該頁點「重新偵測」。",
       "loading": "正在載入依賴狀態...",
       "install": "安裝",
       "installing": "安裝中...",
@@ -448,7 +462,7 @@
       "uninstallFailed": "解除安裝失敗: {{error}}",
       "updating": "更新中...",
       "updateSuccess": "{{name}} 更新成功",
-      "codexMigratedTitle": "Codex 已遷移到「供應商管理 → CLI」",
+"codexMigratedTitle": "Codex 已遷移到「供應商管理 → CLI」",
       "codexMigratedDesc": "Codex 不再從這裡安裝 SDK，改為直接使用你電腦上已裝好的 Codex CLI（@openai/codex），聊天透過官方 app-server 執行。請在「供應商管理 → CLI」查看偵測狀態；如果還沒安裝，先在終端執行 npm install -g @openai/codex，再回到該頁點「重新偵測」。",
       "cliTransportBadge": "CLI · {{transport}}"
     },
@@ -896,6 +910,10 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "codex": {
+          "name": "Codex CLI",
+          "description": "識別本機已安裝的 Codex CLI。版本偵測不讀取帳號設定；聊天透過 app-server 執行。"
+        },
         "minimax": {
           "name": "MiniMax Code",
           "description": "MiniMax 終端編碼智能體。需 Node.js 22.19+ / 24+（不支援 23）；命令：minimax / mcode"
@@ -1018,7 +1036,9 @@
     "noSessions": "暫無歷史會話",
     "noSessionsDesc": "目前專案下沒有找到會話記錄",
     "totalSessions": "共 {{count}} 個會話 · {{total}} 條訊息",
+    "totalSessionsOnly": "共 {{count}} 個會話",
     "messageCount": "{{count}} 條訊息",
+    "messageCountUnknown": "訊息數未統計",
     "searchPlaceholder": "搜尋會話標題...",
     "noSearchResults": "未找到相符的會話",
     "tryOtherKeywords": "嘗試其他搜尋關鍵詞",
@@ -1076,9 +1096,9 @@
       "claude-vscode": "此會話由 VS Code 插件創建，CLI 默認不顯示。點擊「轉為CLI」可使其出現在終端 CLI 的 /resume 列表中",
       "remote": "此會話由遠程 Claude Code 實例創建"
     },
-    "totalSessionsOnly": "共 {{count}} 個會話",
+"totalSessionsOnly": "共 {{count}} 個會話",
     "messageCountUnknown": "訊息數未統計",
-    "loadMore": "載入更多"
+"loadMore": "載入更多"
   },
   "permission": {
     "dialogTitle": "權限請求",
@@ -1166,6 +1186,19 @@
       "loading": "正在載入供應商...",
       "empty": "暫無可用供應商",
       "switched": "已切換到 {{provider}}"
+    },
+    "codexQuota": {
+      "title": "Codex 配額",
+      "loading": "正在載入配額...",
+      "unavailable": "配額不可用",
+      "lastUpdated": "更新於 {{value}}",
+      "fiveHour": "5 小時用量",
+      "weekly": "每週用量",
+      "windowRemainingPercent": "剩餘 {{percent}}%",
+      "windowRemainingPercentWithReset": "剩餘 {{percent}}% · 重置於 {{value}}",
+      "windowUsedOnly": "已用 {{used}}",
+      "windowUnavailable": "不可用",
+      "apiKeyMode": "API 金鑰模式無訂閱配額"
     },
     "nodeProcesses": {
       "title": "Node 進程管理",
@@ -1442,6 +1475,20 @@
   "tools": {
     "toolCall": "工具調用",
     "runCommand": "運行命令",
+    "commandRead": "讀取 {{path}}",
+    "commandList": "列出 {{path}}",
+    "commandSearch": "在 {{path}} 中搜尋 {{query}}",
+    "commandApprovalReason": "批准理由",
+    "patchToggleDiff": "查看修改",
+    "errorOutput": "錯誤詳情",
+    "resultUnknown": "無法確定此工具的個別執行結果",
+    "patchNoDiff": "無可用差異",
+    "patchKind": {
+      "add": "新增",
+      "delete": "刪除",
+      "update": "修改",
+      "move": "移動"
+    },
     "contextEngine": "上下文引擎",
     "task": "任務",
     "promptLabel": "提示詞",
@@ -1469,6 +1516,9 @@
     "showDiffInIdea": "在 IDEA 中顯示變更",
     "diffButton": "Diff",
     "editBatchTitle": "批量編輯檔案",
+    "editGroupProgress": "已結束 {{completed}}/{{total}}",
+    "editGroupAllCompleted": "全部完成",
+    "editGroupFailed": "{{count}} 項失敗",
     "searchBatchTitle": "批量搜尋",
     "editPrefix": "編輯: {{fileName}}",
     "lineRange": "第 {{start}}-{{end}} 行",
@@ -1722,7 +1772,9 @@
   "models": {
     "addModel": "新增模型",
     "searchPlaceholder": "搜尋模型",
+    "clearSearch": "清除搜尋",
     "noModelsFound": "找不到模型",
+    "noSearchMatches": "沒有符合「{{query}}」的模型",
     "hiddenModelCount": "+ 還有 {{count}} 個模型。輸入以搜尋。",
     "pinned": "置頂",
     "pin": "置頂",
@@ -1737,6 +1789,10 @@
       "sonnet5": {
         "label": "Sonnet 5",
         "description": "Sonnet 5 · 預設推薦模型"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Sonnet 最新升級模型"
       },
       "opus55": {
         "label": "Opus 5.5",
@@ -1777,6 +1833,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "新一代旗艦模型，擅長自主電腦操作與長鏈路智慧體任務"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "面向複雜專業工作的 GPT-6.1 前沿模型"
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
@@ -1855,6 +1915,18 @@
       "description": "完全自動化，略過所有權限檢查【請謹慎使用】"
     }
   },
+  "workspaceDiff": {
+    "title": "工作區變更",
+    "staged": "已暫存",
+    "unstaged": "未暫存",
+    "untracked": "未追蹤",
+    "noChanges": "沒有偵測到變更",
+    "binary": "二進位",
+    "truncated": "工作區快照過大，內容已被截斷",
+    "notGit": "目前目錄不是 Git 工作區",
+    "refresh": "重新整理",
+    "fileCount": "{{count}} 個檔案"
+  },
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
@@ -1863,8 +1935,8 @@
     },
     "plan": {
       "label": "Plan Mode",
-      "tooltip": "Plan mode - read-only analysis",
-      "description": "Uses only read-only tools, generates plan for user approval"
+      "tooltip": "原生協作規劃模式",
+      "description": "先生成原生計畫再實施；沙箱範圍和審批策略保持獨立"
     },
     "acceptEdits": {
       "label": "Auto Edit",
@@ -2121,8 +2193,8 @@
     "recommended": "推薦",
     "codexWriterConflict": {
       "title": "Codex 執行緒被佔用",
-      "intro": "新回合啟動時，上一個回合的 Codex 程序仍在寫入該執行緒。外掛現在會在傳送前自動停止上一回合的程序。",
-      "reason": "請稍等幾秒後重新傳送該訊息，無需新建會話。"
+      "intro": "此會話正由另一個 Codex 回合或用戶端寫入，本次傳送未能啟動。",
+      "reason": "請在正在使用此會話的用戶端停止回合，確認結束後再傳送。"
     },
     "codexThreadResume": {
       "title": "工作階段執行緒已失效",

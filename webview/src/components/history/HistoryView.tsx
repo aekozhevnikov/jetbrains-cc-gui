@@ -476,6 +476,15 @@ const HistoryView = ({ historyData, currentProvider, currentSessionId, onLoadSes
         searchQuery={searchQuery}
         t={t}
       />
+      {historyData.source === 'native' && historyData.partial && historyData.cursor !== null
+        && historyData.cursor !== undefined && window.loadCodexHistoryPage && (
+        <button
+          type="button"
+          onClick={() => window.loadCodexHistoryPage?.(historyData.cursor)}
+        >
+          {t('history.loadMore', { defaultValue: 'Load more' })}
+        </button>
+      )}
       <HistoryConfirmDialogs
         deletingSessionId={deletingSessionId}
         convertingSessionId={convertingSessionId}

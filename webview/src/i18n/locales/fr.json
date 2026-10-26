@@ -82,6 +82,7 @@
     "disabled": "Désactivé",
     "sdkNotInstalled": "{{provider}} SDK n'est pas installé. Veuillez installer le SDK pour commencer à discuter.",
     "sdkStatusLoading": "Checking SDK status...",
+    "pasteImagePreparing": "Préparation de l'image collée...",
     "sdkStatusUnavailable": "Impossible de vérifier l'état du SDK.",
     "retrySdkStatus": "Réessayer",
     "openSourceBanner": "Ce projet est garanti 100% open source et gratuit (méfiez-vous des projets piratés)",
@@ -119,6 +120,7 @@
       "openTooltip": "Rechercher dans la conversation (Cmd/Ctrl+F)"
     },
     "compactSummary": {
+      "receivedTime": "Heure enregistrée",
       "summarizedConversation": "Conversation résumée",
       "compactSummary": "Résumé compact",
       "messagesUpTo": "{{count}} messages résumés jusqu'à ce point",
@@ -126,7 +128,7 @@
       "userContext": "Contexte : « {{context}} »",
       "expand": "Développer le résumé",
       "collapse": "Réduire le résumé",
-      "receivedTime": "Heure enregistrée",
+"receivedTime": "Heure enregistrée",
       "nativeCompleted": "Contexte compacté",
       "nativeInProgress": "Compactage du contexte",
       "nativeFailed": "Échec du compactage",
@@ -137,8 +139,8 @@
       "timeUnknown": "Heure inconnue",
       "turnTime": "Début du tour"
     },
-    "pasteImagePreparing": "Préparation de l'image collée...",
-    "codexCompactUsage": "Use /compact without arguments",
+"pasteImagePreparing": "Préparation de l'image collée...",
+"codexCompactUsage": "Use /compact without arguments",
     "codexCompactStarted": "Codex is compacting the conversation",
     "codexReviewUsage": "Use /review without arguments",
     "codexReviewStarted": "Codex is reviewing the workspace",
@@ -418,8 +420,8 @@
       "installPolicyTip": "Problème d'installation ? Copiez l'erreur vers un CLI AI terminal pour résoudre",
       "claudeSdkName": "Claude Code SDK",
       "claudeSdkDescription": "Requis pour les fonctionnalités Claude AI. Inclut Claude Code SDK et les dépendances associées.",
-      "codexSdkName": "Codex SDK",
-      "codexSdkDescription": "Requis pour les fonctionnalités Codex AI. Inclut OpenAI Codex SDK.",
+      "codexMigratedTitle": "Codex a été déplacé vers Gestion des fournisseurs → CLI",
+      "codexMigratedDesc": "Codex n'installe plus de SDK ici : il utilise la CLI Codex déjà installée sur votre machine (@openai/codex) et le chat passe par l'app-server officiel. Consultez son état dans Gestion des fournisseurs → CLI ; si elle n'est pas installée, lancez npm install -g @openai/codex dans un terminal, puis cliquez sur Re-check sur cette page.",
       "loading": "Chargement de l'état des dépendances...",
       "install": "Installer",
       "installing": "Installation...",
@@ -436,7 +438,7 @@
       "uninstallFailed": "Échec de la désinstallation: {{error}}",
       "updating": "Mise à jour...",
       "updateSuccess": "{{name}} mis à jour avec succès",
-      "codexMigratedTitle": "Codex a été déplacé vers Gestion des fournisseurs → CLI",
+"codexMigratedTitle": "Codex a été déplacé vers Gestion des fournisseurs → CLI",
       "codexMigratedDesc": "Codex n'installe plus de SDK ici : il utilise la CLI Codex déjà installée sur votre machine (@openai/codex) et le chat passe par l'app-server officiel. Consultez son état dans Gestion des fournisseurs → CLI ; si elle n'est pas installée, lancez npm install -g @openai/codex dans un terminal, puis cliquez sur Re-check sur cette page.",
       "cliTransportBadge": "CLI · {{transport}}"
     },
@@ -879,6 +881,10 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "codex": {
+          "name": "Codex CLI",
+          "description": "Détecte Codex CLI installé. La vérification de version ne lit pas la configuration du compte ; le chat utilise app-server."
+        },
         "minimax": {
           "name": "MiniMax Code",
           "description": "Agent de code en terminal de MiniMax. Nécessite Node.js 22.19+ / 24+ (pas 23) ; commandes : minimax / mcode"
@@ -977,7 +983,9 @@
     "noSessions": "Aucune session historique",
     "noSessionsDesc": "Aucun enregistrement de session trouvé dans le projet actuel",
     "totalSessions": "{{count}} sessions · {{total}} messages",
+    "totalSessionsOnly": "{{count}} sessions",
     "messageCount": "{{count}} messages",
+    "messageCountUnknown": "Nombre de messages indisponible",
     "searchPlaceholder": "Rechercher titre de session...",
     "noSearchResults": "Aucune session correspondante trouvée",
     "tryOtherKeywords": "Essayez d'autres mots-clés de recherche",
@@ -1033,11 +1041,11 @@
       "claude-vscode": "Cette session a été créée par l'extension VS Code et n'est pas affichée dans CLI par défaut. Cliquez sur 'Convertir en CLI' pour qu'elle apparaisse dans la liste /resume du CLI du terminal",
       "remote": "Cette session a été créée par une instance distante de Claude Code"
     },
-    "convertActiveHint": "Convertir en CLI après la fin de la session",
+"convertActiveHint": "Convertir en CLI après la fin de la session",
     "convertActiveHintTooltip": "Terminez ou fermez d'abord cette session, puis convertissez-la depuis l'historique",
     "totalSessionsOnly": "{{count}} sessions",
     "messageCountUnknown": "Nombre de messages indisponible",
-    "loadMore": "Load more"
+"loadMore": "Load more"
   },
   "permission": {
     "dialogTitle": "Demande de permission",
@@ -1125,6 +1133,19 @@
       "loading": "Chargement des fournisseurs...",
       "empty": "Aucun fournisseur disponible",
       "switched": "Basculé vers {{provider}}"
+    },
+    "codexQuota": {
+      "title": "Quota Codex",
+      "loading": "Chargement du quota...",
+      "unavailable": "Quota indisponible",
+      "lastUpdated": "Mis à jour {{value}}",
+      "fiveHour": "Utilisation 5 h",
+      "weekly": "Utilisation hebdomadaire",
+      "windowRemainingPercent": "{{percent}}% restant",
+      "windowRemainingPercentWithReset": "{{percent}}% restant · Réinitialisation {{value}}",
+      "windowUsedOnly": "{{used}} utilisé",
+      "windowUnavailable": "Indisponible",
+      "apiKeyMode": "Le mode clé API n'a pas de quota d'abonnement"
     },
     "nodeProcesses": {
       "title": "Gestionnaire de processus Node",
@@ -1401,6 +1422,20 @@
   "tools": {
     "toolCall": "Appel d'outil",
     "runCommand": "Exécuter commande",
+    "commandRead": "Lire {{path}}",
+    "commandList": "Lister {{path}}",
+    "commandSearch": "Rechercher {{query}} dans {{path}}",
+    "commandApprovalReason": "Motif de validation",
+    "patchToggleDiff": "Voir les modifications",
+    "errorOutput": "Détails de l’erreur",
+    "resultUnknown": "Résultat individuel de l’outil indisponible",
+    "patchNoDiff": "Différence indisponible",
+    "patchKind": {
+      "add": "Ajouté",
+      "delete": "Supprimé",
+      "update": "Modifié",
+      "move": "Déplacé"
+    },
     "contextEngine": "Moteur de contexte",
     "task": "Tâche",
     "promptLabel": "Prompt",
@@ -1678,7 +1713,9 @@
   "models": {
     "addModel": "Ajouter un modèle",
     "searchPlaceholder": "Rechercher des modèles",
+    "clearSearch": "Effacer la recherche",
     "noModelsFound": "Aucun modèle trouvé",
+    "noSearchMatches": "Aucun modèle ne correspond à « {{query}} »",
     "hiddenModelCount": "+ {{count}} modèles supplémentaires. Tapez pour rechercher.",
     "pinned": "Épinglés",
     "pin": "Épingler",
@@ -1693,6 +1730,10 @@
       "sonnet5": {
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Modèle recommandé par défaut"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Dernière évolution de Sonnet"
       },
       "opus55": {
         "label": "Opus 5.5",
@@ -1733,6 +1774,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "Vaisseau amiral de nouvelle génération pour l'utilisation autonome de l'ordinateur et les longues tâches agentiques."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "Modèle frontier GPT-6.1 pour les travaux professionnels complexes."
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
@@ -1799,6 +1844,21 @@
       "description": "Entièrement automatisé, contourne toutes les vérifications d'autorisation [À utiliser avec prudence]"
     }
   },
+  "workspaceDiff": {
+    "title": "Modifications de l'espace de travail",
+    "staged": "Indexées",
+    "unstaged": "Non indexées",
+    "untracked": "Non suivis",
+    "noChanges": "Aucune modification détectée",
+    "binary": "Binaire",
+    "truncated": "L'instantané de l'espace de travail était trop volumineux et a été tronqué",
+    "notGit": "Le répertoire courant n'est pas un arbre de travail Git",
+    "refresh": "Actualiser",
+    "fileCount": "{{count}} fichiers",
+    "fileCount_one": "{{count}} fichier",
+    "fileCount_many": "{{count}} fichiers",
+    "fileCount_other": "{{count}} fichiers"
+  },
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
@@ -1807,8 +1867,8 @@
     },
     "plan": {
       "label": "Plan Mode",
-      "tooltip": "Plan mode - read-only analysis",
-      "description": "Uses only read-only tools, generates plan for user approval"
+      "tooltip": "Mode plan natif en collaboration",
+      "description": "Génère un plan natif avant l'implémentation ; le sandbox et les approbations restent indépendants"
     },
     "acceptEdits": {
       "label": "Auto Edit",
@@ -2013,8 +2073,8 @@
     "recommended": "Recommandé",
     "codexWriterConflict": {
       "title": "Fil Codex occupé",
-      "intro": "Au démarrage du nouveau tour, le processus Codex du tour précédent écrivait encore dans ce fil. Le plugin arrête désormais automatiquement le tour précédent avant l'envoi.",
-      "reason": "Attendez quelques secondes puis renvoyez le message — inutile de créer une nouvelle session."
+      "intro": "Un autre tour ou client Codex écrit dans cette conversation. Cet envoi n’a pas pu démarrer.",
+      "reason": "Arrêtez le tour dans le client utilisant cette conversation, puis renvoyez le message une fois le tour terminé."
     },
     "codexThreadResume": {
       "title": "Le thread de session n'est plus valide",

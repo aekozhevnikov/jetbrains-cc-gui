@@ -45,6 +45,7 @@ public class CodemossSettingsService {
     private static final Logger LOG = Logger.getInstance(CodemossSettingsService.class);
     private static final int CONFIG_VERSION = 2;
     private static final String CODEX_SANDBOX_MODE_WORKSPACE_WRITE = "workspace-write";
+    private static final String CODEX_SANDBOX_MODE_READ_ONLY = "read-only";
     private static final String CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS = "danger-full-access";
     private static final String UI_FONT_CONFIG_KEY = "uiFont";
     private static final String CODE_FONT_CONFIG_KEY = "codeFont";
@@ -547,14 +548,18 @@ public class CodemossSettingsService {
      * Read the config file.
      */
     public JsonObject readConfig() throws IOException {
-        String configPath = getConfigPath();
+        return this.readConfig(true);
+    }
+
+    private JsonObject readConfig(boolean useDefaultsOnFailure) throws IOException {
+        String configPath = this.getConfigPath();
         File configFile = new File(configPath);
 
         if (!configFile.exists()) {
             // Called many times per second from settings getters, so keep the read path quiet:
             // at INFO this and the line below produced ~250 lines per 3 minutes.
             LOG.debug("[CodemossSettings] Config file not found, creating default: " + configPath);
-            return createDefaultConfig();
+            return this.createDefaultConfig();
         }
 
         try (FileReader reader = new FileReader(configFile, StandardCharsets.UTF_8)) {
@@ -562,8 +567,11 @@ public class CodemossSettingsService {
             LOG.debug("[CodemossSettings] Successfully read config from: " + configPath);
             return config;
         } catch (Exception e) {
+            if (!useDefaultsOnFailure) {
+                throw new IOException("Failed to read configuration: " + configPath, e);
+            }
             LOG.warn("[CodemossSettings] Failed to read config: " + e.getMessage());
-            return createDefaultConfig();
+            return this.createDefaultConfig();
         }
     }
 
@@ -734,6 +742,15 @@ public class CodemossSettingsService {
         return providerManager.setAlwaysThinkingEnabledInActiveProvider(enabled);
     }
 
+    /**
+     * alwaysThinkingEnabled of the active provider profile, or {@code null} when unset.
+     * Mirrors the webview toggle's read order: provider settingsConfig first,
+     * Claude settings.json as fallback.
+     */
+    public Boolean getAlwaysThinkingEnabledInActiveProvider() {
+        return providerManager.getAlwaysThinkingEnabledInActiveProvider();
+    }
+
     public void applyProviderToClaudeSettings(JsonObject provider) throws IOException {
         claudeSettingsManager.applyProviderToClaudeSettings(provider);
     }
@@ -864,6 +881,41 @@ public class CodemossSettingsService {
     }
 
     // ==================== UI Font Config Management ====================
+
+    /**
+     * Read the explicit global font-size level, leaving an unset preference distinguishable from the default.
+     *
+     * @return level from 1 to 6, or null when no valid preference has been saved
+     * @throws IOException if configuration cannot be read
+     */
+    public Integer getFontSizeLevel() throws IOException {
+        // Automatic migration must distinguish an unreadable config from an absent preference.
+        JsonElement value = this.readConfig(false).get("fontSizeLevel");
+        if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber()) {
+            return null;
+        }
+        try {
+            int level = value.getAsBigDecimal().intValueExact();
+            return level >= 1 && level <= 6 ? level : null;
+        } catch (ArithmeticException | NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /**
+     * Persist the global font-size level outside the transient JCEF page storage.
+     *
+     * @param level selected level from 1 to 6
+     * @throws IOException if configuration cannot be saved
+     */
+    public void setFontSizeLevel(int level) throws IOException {
+        if (level < 1 || level > 6) {
+            throw new IllegalArgumentException("Font size level must be between 1 and 6");
+        }
+        JsonObject config = this.readConfig(false);
+        config.addProperty("fontSizeLevel", level);
+        this.writeConfig(config);
+    }
 
     /**
      * Get persisted UI font configuration.
@@ -1193,7 +1245,8 @@ public class CodemossSettingsService {
     }
 
     private boolean isValidCodexSandboxMode(String mode) {
-        return CODEX_SANDBOX_MODE_WORKSPACE_WRITE.equals(mode)
+        return CODEX_SANDBOX_MODE_READ_ONLY.equals(mode)
+                || CODEX_SANDBOX_MODE_WORKSPACE_WRITE.equals(mode)
                 || CODEX_SANDBOX_MODE_DANGER_FULL_ACCESS.equals(mode);
     }
 
@@ -2373,7 +2426,8 @@ public class CodemossSettingsService {
                 return getActiveClaudeProvider() != null && dependencyManager.isInstalled("claude-sdk");
             }
             if (AI_FEATURE_PROVIDER_CODEX.equals(provider)) {
-                return getActiveCodexProvider() != null && dependencyManager.isInstalled("codex-sdk");
+                CliToolStatus status = cliStatuses != null ? cliStatuses.get(provider) : null;
+                return this.getActiveCodexProvider() != null && status != null && status.isInstalled();
             }
             CliToolStatus status = cliStatuses != null ? cliStatuses.get(provider) : null;
             return status != null && status.isInstalled();

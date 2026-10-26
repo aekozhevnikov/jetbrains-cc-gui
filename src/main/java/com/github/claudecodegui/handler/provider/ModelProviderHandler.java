@@ -32,6 +32,7 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("claude-fable-5-1", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-5-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-5", 200_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-5-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-5", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7", 200_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6", 200_000);
@@ -42,6 +43,7 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("claude-fable-5-1[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-5-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-opus-5[1m]", 1_000_000);
+        MODEL_CONTEXT_LIMITS.put("claude-sonnet-5-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-5[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-7[1m]", 1_000_000);
         MODEL_CONTEXT_LIMITS.put("claude-sonnet-4-6[1m]", 1_000_000);
@@ -52,6 +54,7 @@ public class ModelProviderHandler {
         MODEL_CONTEXT_LIMITS.put("claude-haiku-4-5", 200_000);
         // Codex/GPT models
         MODEL_CONTEXT_LIMITS.put("gpt-6-astra", 1_050_000);
+        MODEL_CONTEXT_LIMITS.put("gpt-6.1-sol", 1_050_000);
         MODEL_CONTEXT_LIMITS.put("gpt-6-sol", 1_050_000);
         MODEL_CONTEXT_LIMITS.put("gpt-5.6-sol", 1_050_000);
         MODEL_CONTEXT_LIMITS.put("gpt-5.6-terra", 1_050_000);

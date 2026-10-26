@@ -83,6 +83,7 @@ describe('ModelSelect', () => {
       'claude-fable-5',
       'claude-opus-5-5',
       'claude-opus-5',
+      'claude-sonnet-5-5',
       'claude-sonnet-5',
       'claude-haiku-4-5',
     ]);
@@ -98,6 +99,7 @@ describe('ModelSelect', () => {
   it('Codex 内置模型列表应与目标设计一致', () => {
     expect(CODEX_MODELS.map((model) => model.id)).toEqual([
       'gpt-6-astra',
+      'gpt-6.1-sol',
       'gpt-6-sol',
       'gpt-5.6-sol',
       'gpt-5.6-terra',
@@ -225,6 +227,109 @@ describe('ModelSelect', () => {
     // Empty vendor groups disappear; a single remaining match stays flat (no group header).
     expect(screen.queryByTestId('model-group-opencode')).toBeNull();
     expect(screen.queryByTestId('model-group-deepseek')).toBeNull();
+  });
+
+  it('多词搜索应按 AND 语义匹配，未命中时回显搜索词', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek flash' } });
+    expect(screen.getByTestId('model-option-deepseek/deepseek-v4-flash-free')).toBeTruthy();
+    expect(screen.queryByTestId('model-option-opencode/longcat-2.0-free')).toBeNull();
+
+    fireEvent.change(input, { target: { value: 'big deepseek' } });
+    expect(screen.queryByTestId('model-option-deepseek/deepseek-v4-flash-free')).toBeNull();
+    expect(screen.getByTestId('model-no-results').textContent).toBe('models.noSearchMatches');
+
+    fireEvent.change(input, { target: { value: '' } });
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+  });
+
+  it('搜索框应提供清空按钮，点击后恢复完整列表', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    expect(screen.queryByTestId('model-search-clear')).toBeNull();
+
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek' } });
+    expect(input.value).toBe('deepseek');
+
+    fireEvent.click(screen.getByTestId('model-search-clear'));
+    expect(input.value).toBe('');
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+    // Dropdown stays open after clearing.
+    expect(screen.getByTestId('model-search-input')).toBeTruthy();
+  });
+
+  it('搜索激活时应预高亮第一条，↑↓ 移动高亮，Enter 选中', () => {
+    const onChange = vi.fn();
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={onChange}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input');
+    fireEvent.change(input, { target: { value: 'free' } });
+
+    // First hit is pre-highlighted while searching.
+    const first = screen.getByTestId('model-option-opencode/longcat-2.0-free');
+    expect(first.className).toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    const second = screen.getByTestId('model-option-deepseek/deepseek-v4-flash-free');
+    expect(second.className).toContain('keyboard-highlighted');
+    expect(first.className).not.toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' });
+    fireEvent.keyDown(input, { key: 'ArrowUp' });
+    expect(second.className).toContain('keyboard-highlighted');
+
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onChange).toHaveBeenCalledWith('deepseek/deepseek-v4-flash-free');
+    expect(screen.queryByTestId('model-search-input')).toBeNull();
+  });
+
+  it('Escape 应先清空搜索词，再次按下时才关闭下拉', () => {
+    render(
+      <ModelSelect
+        value="opencode/big-pickle"
+        onChange={vi.fn()}
+        models={openCodeModels}
+        currentProvider="opencode"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button'));
+    const input = screen.getByTestId('model-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'deepseek' } });
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(input.value).toBe('');
+    expect(screen.getByTestId('model-option-opencode/big-pickle')).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByTestId('model-search-input')).toBeNull();
   });
 
   it('置顶后模型应出现在 Pinned 分组顶部', () => {

@@ -1,5 +1,6 @@
 import { AVAILABLE_MODELS, modelSupports1MContext } from './types';
 import type { ModelInfo } from './types';
+import { resolveClaudeModelMappingLabel } from '../../utils/claudeModelMapping';
 
 type Translate = (key: string, options?: { defaultValue?: string } & Record<string, unknown>) => string;
 
@@ -14,6 +15,7 @@ const DEFAULT_MODEL_MAP: Record<string, ModelInfo> = AVAILABLE_MODELS.reduce(
 export const MODEL_LABEL_KEYS: Record<string, string> = {
   'claude-opus-5-5': 'models.claude.opus55.label',
   'claude-opus-5': 'models.claude.opus5.label',
+  'claude-sonnet-5-5': 'models.claude.sonnet55.label',
   'claude-sonnet-5': 'models.claude.sonnet5.label',
   'claude-sonnet-4-6': 'models.claude.sonnet46.label',
   'claude-fable-5-1': 'models.claude.fable51.label',
@@ -22,6 +24,7 @@ export const MODEL_LABEL_KEYS: Record<string, string> = {
   'claude-opus-4-6[1m]': 'models.claude.opus46_1m.label',
   'claude-haiku-4-5': 'models.claude.haiku45.label',
   'gpt-6-astra': 'models.codex.gpt6astra.label',
+  'gpt-6.1-sol': 'models.codex.gpt61sol.label',
   'gpt-6-sol': 'models.codex.gpt6sol.label',
   'gpt-5.6-sol': 'models.codex.gpt56sol.label',
   'gpt-5.6-terra': 'models.codex.gpt56terra.label',
@@ -37,6 +40,7 @@ export const MODEL_LABEL_KEYS: Record<string, string> = {
 export const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
   'claude-opus-5-5': 'models.claude.opus55.description',
   'claude-opus-5': 'models.claude.opus5.description',
+  'claude-sonnet-5-5': 'models.claude.sonnet55.description',
   'claude-sonnet-5': 'models.claude.sonnet5.description',
   'claude-sonnet-4-6': 'models.claude.sonnet46.description',
   'claude-fable-5-1': 'models.claude.fable51.description',
@@ -45,6 +49,7 @@ export const MODEL_DESCRIPTION_KEYS: Record<string, string> = {
   'claude-opus-4-6[1m]': 'models.claude.opus46_1m.description',
   'claude-haiku-4-5': 'models.claude.haiku45.description',
   'gpt-6-astra': 'models.codex.gpt6astra.description',
+  'gpt-6.1-sol': 'models.codex.gpt61sol.description',
   'gpt-6-sol': 'models.codex.gpt6sol.description',
   'gpt-5.6-sol': 'models.codex.gpt56sol.description',
   'gpt-5.6-terra': 'models.codex.gpt56terra.description',
@@ -67,6 +72,7 @@ export const MODEL_ID_TO_MAPPING_KEY: Record<string, string> = {
   'claude-fable-5': 'fable',
   'claude-opus-5-5': 'opus',
   'claude-opus-5': 'opus',
+  'claude-sonnet-5-5': 'sonnet',
   'claude-sonnet-5': 'sonnet',
   'claude-sonnet-4-7': 'sonnet',
   'claude-sonnet-4-6': 'sonnet',
@@ -100,6 +106,9 @@ export const resolveModelIdForIcon = (
   modelMapping: Record<string, string | undefined>,
   mappingKeyMap: Record<string, string> = MODEL_ID_TO_MAPPING_KEY,
 ): string => {
+  // Match the upstream model, never the gateway's provider key or transport prefix.
+  const route = /^ccs-claude-.+?--(.+)$/i.exec(modelId);
+  if (route) return route[1].replace(/\[1m\]$/i, '');
   const mappingKey = mappingKeyMap[modelId];
   if (!mappingKey) {
     return modelId;
@@ -156,7 +165,7 @@ export function resolveModelDisplayLabel(
 
   const mappingKey = MODEL_ID_TO_MAPPING_KEY[model.id];
   if (mappingKey) {
-    const mappedName = resolveMappedModelName(mappingKey, modelMapping);
+    const mappedName = resolveClaudeModelMappingLabel(mappingKey, modelMapping);
     if (mappedName) {
       return append1MContextSuffix(
         mappedName,

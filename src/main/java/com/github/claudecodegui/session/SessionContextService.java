@@ -3,6 +3,7 @@ package com.github.claudecodegui.session;
 import com.github.claudecodegui.service.RunConfigMonitorService;
 import com.github.claudecodegui.terminal.TerminalMonitorService;
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.openapi.diagnostic.Logger;
@@ -12,6 +13,7 @@ import com.intellij.openapi.util.Computable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -74,9 +76,67 @@ public class SessionContextService {
         return userMessage;
     }
 
-    public String buildCodexContextAppend(JsonObject openedFilesJson, List<String> fileTagPaths) {
+    /** Keeps changing editor references separate from the user's native message. */
+    public JsonObject buildCodexAdditionalContext(JsonObject openedFilesJson, List<String> fileTagPaths) {
+        Map<String, String> sections = this.buildMessageContext(openedFilesJson, null, false);
+        // Native limits apply per fragment, so explicit references must not share a budget with editor state.
+        if (fileTagPaths != null) {
+            for (int index = 0; index < fileTagPaths.size(); index++) {
+                String path = fileTagPaths.get(index);
+                if (path != null) {
+                    for (Map.Entry<String, String> section : this.buildMessageContext(null, List.of(path), false).entrySet()) {
+                        sections.put(section.getKey() + "_" + index, section.getValue());
+                    }
+                }
+            }
+        }
+        JsonObject fragments = new JsonObject();
+        for (Map.Entry<String, String> section : sections.entrySet()) {
+            JsonObject editorContext = new JsonObject();
+            editorContext.addProperty("kind", "application");
+            editorContext.addProperty("value", section.getValue().strip());
+            fragments.add(section.getKey(), editorContext);
+        }
+        return fragments;
+    }
+
+    /** Preserves the existing module context for other CLI providers. */
+    public String buildLegacyContextAppend(JsonObject openedFilesJson, List<String> fileTagPaths) {
+        return String.join("", this.buildMessageContext(openedFilesJson, fileTagPaths, true).values());
+    }
+
+    /** Combines role instructions and project modules for native thread initialization and cold resume. */
+    public String buildCodexSessionInstructions(String roleInstructions, JsonObject openedFilesJson) {
+        String modules = buildProjectModules(openedFilesJson);
+        if (modules.isEmpty()) {
+            return roleInstructions;
+        }
+        return (roleInstructions == null || roleInstructions.isBlank() ? "" : roleInstructions + "\n\n") + modules.stripLeading();
+    }
+
+    private static String buildProjectModules(JsonObject openedFilesJson) {
+        if (openedFilesJson == null || !openedFilesJson.has("modules") || !openedFilesJson.get("modules").isJsonArray()
+                || openedFilesJson.has("isWorkspace") && openedFilesJson.get("isWorkspace").getAsBoolean()) {
+            return "";
+        }
+        JsonArray modules = openedFilesJson.getAsJsonArray("modules");
+        if (modules.size() <= 1) {
+            return "";
+        }
+        StringBuilder context = new StringBuilder("\n\n## Project Modules\n\nThis project contains multiple modules:\n");
+        for (JsonElement element : modules) {
+            if (!element.isJsonObject()) {
+                continue;
+            }
+            JsonObject module = element.getAsJsonObject();
+            context.append("- `").append(module.has("name") ? module.get("name").getAsString() : "unknown").append("`\n");
+        }
+        return context.append('\n').toString();
+    }
+
+    private Map<String, String> buildMessageContext(JsonObject openedFilesJson, List<String> fileTagPaths, boolean includeModules) {
+        Map<String, String> sections = new LinkedHashMap<>();
         StringBuilder sb = new StringBuilder();
-        boolean hasContent = false;
 
         // 0. Workspace/Multi-project context (highest priority for project structure understanding)
         if (openedFilesJson != null && openedFilesJson.has("isWorkspace")
@@ -119,23 +179,14 @@ public class SessionContextService {
 
             sb.append("When working with files, consider which subproject they belong to. ")
                 .append("Each subproject may have its own build configuration, dependencies, and codebase structure.\n");
-            hasContent = true;
+            sections.put("workspace_context", sb.toString());
+            sb.setLength(0);
         }
 
-        // Also show module info for single projects with multiple modules
-        if (openedFilesJson != null && openedFilesJson.has("modules")) {
-            JsonArray modules = openedFilesJson.getAsJsonArray("modules");
-            if (modules.size() > 1 && (!openedFilesJson.has("isWorkspace")
-                    || !openedFilesJson.get("isWorkspace").getAsBoolean())) {
-                sb.append("\n\n## Project Modules\n\n");
-                sb.append("This project contains multiple modules:\n");
-                for (int i = 0; i < modules.size(); i++) {
-                    JsonObject mod = modules.get(i).getAsJsonObject();
-                    String name = mod.has("name") ? mod.get("name").getAsString() : "unknown";
-                    sb.append("- `").append(name).append("`\n");
-                }
-                sb.append("\n");
-                hasContent = true;
+        if (includeModules) {
+            String modules = buildProjectModules(openedFilesJson);
+            if (!modules.isEmpty()) {
+                sections.put("project_modules", modules);
             }
         }
 
@@ -160,7 +211,8 @@ public class SessionContextService {
                 sb.append("- **Terminal**: `").append(sessionName).append("`\n");
             }
             sb.append("\nCommands should be executed in this terminal context.\n\n");
-            hasContent = true;
+            sections.put("terminal_context", sb.toString());
+            sb.setLength(0);
         }
 
         if (!regularFilePaths.isEmpty()) {
@@ -175,7 +227,8 @@ public class SessionContextService {
             }
             sb.append("\nRead them with your file tools as needed; ")
                 .append("the user expects answers based on their content.\n");
-            hasContent = true;
+            sections.put("referenced_files", sb.toString());
+            sb.setLength(0);
         }
 
         if (openedFilesJson != null && !openedFilesJson.isJsonNull()) {
@@ -216,22 +269,42 @@ public class SessionContextService {
                     }
                 }
                 sb.append("`\n\n");
-                sb.append("The user has selected the referenced lines in this file; ")
-                    .append("the selection is the primary subject of the user's question. ")
-                    .append("Read the file to see the selected code.\n");
-                hasContent = true;
+                if (includeModules) {
+                    sb.append("The user has selected the referenced lines in this file; ")
+                        .append("the selection is the primary subject of the user's question. ")
+                        .append("Read the file to see the selected code.\n");
+                } else {
+                    sb.append("The user has selected these lines in the editor. Read them if relevant to the request.\n");
+                }
             } else if (activeFile != null && !activeFile.trim().isEmpty()) {
                 sb.append("\n\n## User's Current IDE Context\n\n");
-                sb.append("The user is viewing this file in their IDE. ")
-                    .append("This is the PRIMARY SUBJECT of the user's question: `")
+                sb.append("The user is viewing this file in their IDE. ");
+                sb.append(includeModules ? "This is the PRIMARY SUBJECT of the user's question: `" : "Active file: `")
                     .append(activeFile).append("`\n\n");
                 sb.append("Read it with your file tools as needed.\n");
-                hasContent = true;
                 LOG.info("[Codex Context] Referenced active file: " + activeFile);
+            }
+            if (sb.length() > 0) {
+                sections.put("ide_context", sb.toString());
+                sb.setLength(0);
+            }
+            if (!includeModules && openedFilesJson.has("others") && openedFilesJson.get("others").isJsonArray()) {
+                JsonArray openTabs = openedFilesJson.getAsJsonArray("others");
+                if (!openTabs.isEmpty()) {
+                    sb.append("\n\n## Other Open Tabs\n\n");
+                    // Paths provide orientation without copying potentially unsaved or unrelated code.
+                    for (int index = 0; index < Math.min(openTabs.size(), 20); index++) {
+                        sb.append("- `").append(openTabs.get(index).getAsString()).append("`\n");
+                    }
+                    if (openTabs.size() > 20) {
+                        sb.append("Additional open tabs omitted.\n");
+                    }
+                    sections.put("open_tabs", sb.toString());
+                }
             }
         }
 
-        return hasContent ? sb.toString() : "";
+        return sections;
     }
 
     private String processReferences(

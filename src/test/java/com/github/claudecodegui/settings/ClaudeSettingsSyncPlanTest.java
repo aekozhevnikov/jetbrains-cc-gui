@@ -12,6 +12,46 @@ import static org.junit.Assert.assertTrue;
  * Mirrors vscode-cc-gui claudeSettingsSync.test.mts.
  */
 public class ClaudeSettingsSyncPlanTest {
+    @Test
+    public void switchingManagedProviderReplacesPickerAndAllRoleNames() {
+        JsonObject current = new JsonObject();
+        JsonObject oldPicker = new JsonObject();
+        oldPicker.addProperty("replaceBuiltInOptions", true);
+        current.add("modelPicker", oldPicker);
+        current.addProperty("customSetting", "keep");
+        JsonObject oldEnv = new JsonObject();
+        for (String role : new String[]{"HAIKU", "SONNET", "OPUS", "FABLE"}) {
+            oldEnv.addProperty("ANTHROPIC_DEFAULT_" + role + "_MODEL_NAME", "old");
+        }
+        oldEnv.addProperty("CUSTOM_ENV", "keep");
+        current.add("env", oldEnv);
+        JsonObject active = new JsonObject();
+        active.addProperty("id", "managed-direct");
+        JsonObject config = new JsonObject();
+        JsonObject env = new JsonObject();
+        env.addProperty("ANTHROPIC_MODEL", "glm-pro");
+        env.addProperty("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME", "New name");
+        config.add("env", env);
+        active.add("settingsConfig", config);
+        JsonObject next = ClaudeSettingsSyncPlan.plan(current, active).nextSettings;
+        assertTrue(!next.has("modelPicker"));
+        assertEquals("keep", next.get("customSetting").getAsString());
+        assertEquals("keep", next.getAsJsonObject("env").get("CUSTOM_ENV").getAsString());
+        assertEquals("New name", next.getAsJsonObject("env").get("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME").getAsString());
+        for (String role : new String[]{"HAIKU", "OPUS", "FABLE"}) {
+            assertTrue(!next.getAsJsonObject("env").has("ANTHROPIC_DEFAULT_" + role + "_MODEL_NAME"));
+        }
+        assertTrue(current.has("modelPicker"));
+        assertEquals("old", oldEnv.get("ANTHROPIC_DEFAULT_SONNET_MODEL_NAME").getAsString());
+        JsonObject replacement = new JsonObject();
+        replacement.addProperty("replaceBuiltInOptions", false);
+        config.add("modelPicker", replacement);
+        assertEquals(replacement, ClaudeSettingsSyncPlan.plan(current, active).nextSettings.get("modelPicker"));
+        active.addProperty("id", ProviderManager.LOCAL_SETTINGS_PROVIDER_ID);
+        assertEquals(ClaudeSettingsSyncPlan.Action.SKIP, ClaudeSettingsSyncPlan.plan(current, active).action);
+        assertEquals(oldPicker, current.get("modelPicker"));
+    }
+
 
     @Test
     public void skipsLocalSettingsMode() {
@@ -109,5 +149,43 @@ public class ClaudeSettingsSyncPlanTest {
         assertEquals(ClaudeSettingsSyncPlan.Action.SKIP, d.action);
         assertTrue(d.reason.contains("cli-login"));
         assertNull(d.nextSettings);
+    }
+
+    /**
+     * Regression for #1307: API_TIMEOUT_MS is a user-tunable performance knob,
+     * not a plugin-managed credential. It must survive provider sync so users
+     * can extend the timeout for slow local backends (e.g. Ollama with 80k+
+     * token contexts that exceed the CLI's built-in default).
+     */
+    @Test
+    public void preservesUserConfiguredApiTimeoutMs() {
+        JsonObject current = new JsonObject();
+        JsonObject env = new JsonObject();
+        env.addProperty("ANTHROPIC_AUTH_TOKEN", "old");
+        env.addProperty("ANTHROPIC_BASE_URL", "http://localhost:11434");
+        // User explicitly raised the timeout for a slow local Ollama backend.
+        env.addProperty("API_TIMEOUT_MS", "900000");
+        current.add("env", env);
+
+        JsonObject active = new JsonObject();
+        active.addProperty("id", "proxy-ollama");
+        active.addProperty("isActive", true);
+        JsonObject settingsConfig = new JsonObject();
+        JsonObject newEnv = new JsonObject();
+        newEnv.addProperty("ANTHROPIC_AUTH_TOKEN", "new");
+        newEnv.addProperty("ANTHROPIC_BASE_URL", "http://localhost:11434");
+        settingsConfig.add("env", newEnv);
+        active.add("settingsConfig", settingsConfig);
+
+        ClaudeSettingsSyncPlan.Decision d = ClaudeSettingsSyncPlan.plan(current, active);
+        assertEquals(ClaudeSettingsSyncPlan.Action.WRITE, d.action);
+        assertNotNull(d.nextSettings);
+        JsonObject outEnv = d.nextSettings.getAsJsonObject("env");
+        // Managed credentials are replaced by the provider payload...
+        assertEquals("new", outEnv.get("ANTHROPIC_AUTH_TOKEN").getAsString());
+        // ...but the user's API_TIMEOUT_MS is NOT stripped (#1307).
+        assertTrue("API_TIMEOUT_MS must survive provider sync",
+                outEnv.has("API_TIMEOUT_MS"));
+        assertEquals("900000", outEnv.get("API_TIMEOUT_MS").getAsString());
     }
 }

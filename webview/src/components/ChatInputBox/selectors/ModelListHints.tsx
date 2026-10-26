@@ -4,6 +4,8 @@ interface ModelListHintsProps {
   loading: boolean;
   visibleModelCount: number;
   hiddenModelCount: number;
+  /** Active search text; the empty message echoes it when set. */
+  searchQuery?: string;
 }
 
 /**
@@ -14,14 +16,17 @@ export const ModelListHints = ({
   loading,
   visibleModelCount,
   hiddenModelCount,
+  searchQuery,
 }: ModelListHintsProps) => {
   const { t } = useTranslation();
 
   return (
     <>
       {visibleModelCount === 0 && !loading && (
-        <div className="selector-option selector-option-status">
-          {t('models.noModelsFound', { defaultValue: 'No models found' })}
+        <div className="selector-option selector-option-status" data-testid="model-no-results">
+          {searchQuery
+            ? t('models.noSearchMatches', { query: searchQuery, defaultValue: `No models match "${searchQuery}"` })
+            : t('models.noModelsFound', { defaultValue: 'No models found' })}
         </div>
       )}
       {hiddenModelCount > 0 && (

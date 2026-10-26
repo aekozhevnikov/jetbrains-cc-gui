@@ -73,6 +73,18 @@
     "context": "Context",
     "usage": "Usage",
     "usagePercentage": "Usage: {{percentage}}",
+    "planUsage": {
+      "title": "Claude plan usage",
+      "loading": "Loading usage…",
+      "unavailable": "Usage unavailable",
+      "dash": "Usage —",
+      "tooltipWindow": "{{period}} · {{percent}} used",
+      "tooltipReset": "Resets: {{value}} (local time)",
+      "clickToSwitch": "Click period label to switch window",
+      "worstHint": "Dot shows worst window ({{color}})",
+      "paceColors": { "green": "green", "yellow": "yellow", "red": "red", "neutral": "unknown" },
+      "stale": "Data may be outdated (refresh failed)"
+    },
     "noMatchingFiles": "No matching files",
     "noMatchingCommands": "No matching commands",
     "noMatchingHistory": "No matching history",
@@ -99,6 +111,7 @@
     "disabled": "Disabled",
     "sdkNotInstalled": "{{provider}} SDK is not installed. Please install the SDK to start chatting.",
     "sdkStatusLoading": "Checking SDK status...",
+    "pasteImagePreparing": "Preparing pasted image...",
     "sdkStatusUnavailable": "Could not check SDK status.",
     "retrySdkStatus": "Retry",
     "openSourceBanner": "This project is guaranteed to be 100% open source and free (beware of pirated projects)",
@@ -138,6 +151,7 @@
       "openTooltip": "Search in conversation (Cmd/Ctrl+F)"
     },
     "compactSummary": {
+      "receivedTime": "Recorded time",
       "summarizedConversation": "Summarized conversation",
       "compactSummary": "Compact summary",
       "messagesUpTo": "Summarized {{count}} messages up to this point",
@@ -145,7 +159,7 @@
       "userContext": "Context: \"{{context}}\"",
       "expand": "Expand summary",
       "collapse": "Collapse summary",
-      "receivedTime": "Recorded time",
+"receivedTime": "Recorded time",
       "nativeCompleted": "Context compacted",
       "nativeInProgress": "Compacting context",
       "nativeFailed": "Compaction failed",
@@ -156,7 +170,7 @@
       "timeUnknown": "Time unavailable",
       "turnTime": "Turn start time"
     },
-    "planUsage": {
+"planUsage": {
       "title": "Claude plan usage",
       "loading": "Loading usage…",
       "unavailable": "Usage unavailable",
@@ -174,7 +188,7 @@
       "stale": "Data may be outdated (refresh failed)"
     },
     "pasteImagePreparing": "Preparing pasted image...",
-    "codexCompactUsage": "Use /compact without arguments",
+"codexCompactUsage": "Use /compact without arguments",
     "codexCompactStarted": "Codex is compacting the conversation",
     "codexReviewUsage": "Use /review without arguments",
     "codexReviewStarted": "Codex is reviewing the workspace",
@@ -529,6 +543,18 @@
         "autoSummary": "Follows the current chat CLI · currently {{provider}}",
         "autoUnavailable": "No CLI is available right now. Switch to Manual to pick one."
       },
+      "bashGroupCollapsed": {
+        "label": "Collapse batch commands by default",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "hint": "Applies to batch command groups from all CLIs. When enabled, groups show only their title and execution status by default; click the title to expand the command list. When disabled, groups expand by default. Changes apply immediately; manually expanded or collapsed groups keep their state."
+      },
+      "editGroupCollapsed": {
+        "label": "Collapse batch file edits by default",
+        "enabled": "Enabled",
+        "disabled": "Disabled",
+        "hint": "Applies to batch file edit groups from all CLIs. When enabled, groups show their title, edit count, added/deleted line counts, and execution status by default; click the title to expand the file list. When disabled, groups expand by default. Multiple edits to the same file are counted separately. Changes apply immediately; manually expanded or collapsed groups keep their state. Expand diffs by default controls inline diffs for individual edits; it does not control whether batch groups expand."
+      },
       "diffExpanded": {
         "label": "Expand diffs by default",
         "enabled": "Enabled",
@@ -692,6 +718,10 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "codex": {
+          "name": "Codex CLI",
+          "description": "Detect the installed Codex CLI. Version probing reads no account configuration; chat uses app-server."
+        },
         "minimax": {
           "name": "MiniMax Code",
           "description": "MiniMax terminal coding agent. Requires Node.js 22.19+ / 24+ (not 23); commands: minimax / mcode"
@@ -811,8 +841,8 @@
       "installPolicyTip": "Installation issues? Copy the error to a terminal CLI AI to resolve",
       "claudeSdkName": "Claude Code SDK",
       "claudeSdkDescription": "Required for Claude AI features. Includes Claude Code SDK and related dependencies.",
-      "codexSdkName": "Codex SDK",
-      "codexSdkDescription": "Required for Codex AI features. Includes OpenAI Codex SDK.",
+      "codexMigratedTitle": "Codex has moved to Provider Management → CLI",
+      "codexMigratedDesc": "Codex no longer installs an SDK here. It uses the Codex CLI already installed on your machine (@openai/codex), and chat runs through the official app-server. Check its status under Provider Management → CLI; if it is not installed yet, run npm install -g @openai/codex in a terminal, then click Re-check there.",
       "loading": "Loading dependency status...",
       "install": "Install",
       "installing": "Installing...",
@@ -840,7 +870,7 @@
       "uninstallFailed": "Uninstall failed: {{error}}",
       "updating": "Updating...",
       "updateSuccess": "{{name}} updated successfully",
-      "codexMigratedTitle": "Codex has moved to Provider Management → CLI",
+"codexMigratedTitle": "Codex has moved to Provider Management → CLI",
       "codexMigratedDesc": "Codex no longer installs an SDK here. It uses the Codex CLI already installed on your machine (@openai/codex), and chat runs through the official app-server. Check its status under Provider Management → CLI; if it is not installed yet, run npm install -g @openai/codex in a terminal, then click Re-check there.",
       "cliTransportBadge": "CLI · {{transport}}"
     },
@@ -852,6 +882,9 @@
     "permissionsDesc": "Manage Claude Code file access and operation permissions",
     "codexPermissionsDesc": "Manage Codex permissions and sandbox policies",
     "permissionsPanel": {
+      "desired": "Desired: {{mode}}",
+      "effective": "Effective: {{mode}}",
+      "conflict": "Native policy rejected the requested access range.",
       "codexSandboxTitle": "Codex Sandbox Mode",
       "codexSandboxDesc": "Control system access boundaries when Codex executes commands. Defaults to the safer workspace-write (read/write within the workspace only). Switch to danger-full-access for system-level commands such as adb or docker.",
       "workspaceWriteTitle": "workspace-write",
@@ -859,11 +892,11 @@
       "fullAccessTitle": "danger-full-access",
       "fullAccessDesc": "Allows higher system access, suitable for commands like adb or docker that require extra permissions.",
       "hint": "This setting only affects Codex process sandboxing and does not change Claude Code permission behavior.",
-      "claudeTip": "Claude Code approval mode is configured from the chat input mode selector.",
+"claudeTip": "Claude Code approval mode is configured from the chat input mode selector.",
       "desired": "Desired: {{mode}}",
       "effective": "Effective: {{mode}}",
       "conflict": "Native policy rejected the requested access range.",
-      "source": "Source: {{source}}",
+"source": "Source: {{source}}",
       "readOnlyTitle": "Read only",
       "readOnlyDesc": "Inspect files without writing to the workspace."
     },
@@ -1421,7 +1454,9 @@
     "noSessions": "No history sessions",
     "noSessionsDesc": "No session records found in current project",
     "totalSessions": "{{count}} sessions · {{total}} messages",
+    "totalSessionsOnly": "{{count}} sessions",
     "messageCount": "{{count}} messages",
+    "messageCountUnknown": "Message count unavailable",
     "searchPlaceholder": "Search session titles...",
     "noSearchResults": "No matching sessions found",
     "tryOtherKeywords": "Try other search keywords",
@@ -1468,7 +1503,7 @@
       "minutesAgo": "minutes ago",
       "secondsAgo": "seconds ago"
     },
-    "convertActiveHint": "Convert to CLI after ending the session",
+"convertActiveHint": "Convert to CLI after ending the session",
     "convertActiveHintTooltip": "End or close this session first, then convert it from the history list",
     "convertAllToCliSessions": "Convert all to CLI ({{count}})",
     "convertAllToCliSessionsTooltip": "Convert {{count}} session(s) created through the SDK into CLI entries so they appear in the Claude Code CLI /resume list. The session currently in use is skipped.",
@@ -1846,6 +1881,20 @@
   "tools": {
     "toolCall": "Tool Call",
     "runCommand": "Run Command",
+    "commandRead": "Read {{path}}",
+    "commandList": "List {{path}}",
+    "commandSearch": "Search {{query}} in {{path}}",
+    "commandApprovalReason": "Approval reason",
+    "patchToggleDiff": "Show changes",
+    "errorOutput": "Error output",
+    "resultUnknown": "Individual tool result unavailable",
+    "patchNoDiff": "Diff unavailable",
+    "patchKind": {
+      "add": "Added",
+      "delete": "Deleted",
+      "update": "Updated",
+      "move": "Moved"
+    },
     "contextEngine": "Context Engine",
     "task": "Task",
     "agent": "Agent",
@@ -1874,6 +1923,9 @@
     "showDiffInIdea": "Show changes in IDEA",
     "diffButton": "Diff",
     "editBatchTitle": "Batch Edit Files",
+    "editGroupProgress": "{{completed}}/{{total}} finished",
+    "editGroupAllCompleted": "All Completed",
+    "editGroupFailed": "Failed: {{count}}",
     "searchBatchTitle": "Batch Search",
     "editPrefix": "Edit: {{fileName}}",
     "lineRange": "Lines {{start}}-{{end}}",
@@ -2154,7 +2206,9 @@
   "models": {
     "addModel": "Add Model",
     "searchPlaceholder": "Search models",
+    "clearSearch": "Clear search",
     "noModelsFound": "No models found",
+    "noSearchMatches": "No models match \"{{query}}\"",
     "hiddenModelCount": "+ {{count}} more models. Type to search.",
     "pinned": "Pinned",
     "pin": "Pin",
@@ -2175,6 +2229,10 @@
       "sonnet5": {
         "label": "Sonnet 5",
         "description": "Sonnet 5 · Use the default model"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · Latest Sonnet upgrade"
       },
       "opus55": {
         "label": "Opus 5.5",
@@ -2209,6 +2267,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "New-generation flagship for autonomous computer use and long agentic tasks."
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "GPT-6.1 frontier model for complex professional work."
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
@@ -2293,6 +2355,20 @@
       "description": "Fully automated, bypassing all permission checks [Use with caution]"
     }
   },
+  "workspaceDiff": {
+    "title": "Workspace changes",
+    "staged": "Staged",
+    "unstaged": "Unstaged",
+    "untracked": "Untracked",
+    "noChanges": "No changes detected",
+    "binary": "Binary",
+    "truncated": "The workspace snapshot was too large and has been truncated",
+    "notGit": "The current directory is not a Git working tree",
+    "refresh": "Refresh",
+    "fileCount": "{{count}} files",
+    "fileCount_one": "{{count}} file",
+    "fileCount_other": "{{count}} files"
+  },
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
@@ -2302,8 +2378,8 @@
     "plan": {
       "label": "Plan Mode",
       "shortLabel": "Plan",
-      "tooltip": "Plan mode - read-only analysis",
-      "description": "Uses only read-only tools, generates plan for user approval"
+      "tooltip": "Native collaboration plan mode",
+      "description": "Builds a native plan before implementation; sandbox and approvals stay independent"
     },
     "acceptEdits": {
       "label": "Auto Edit",
@@ -2598,8 +2674,8 @@
     "recommended": "Recommended",
     "codexWriterConflict": {
       "title": "Codex thread is busy",
-      "intro": "When the new turn started, the previous turn's Codex process was still writing to this thread. The plugin now stops the previous turn automatically before sending.",
-      "reason": "Wait a few seconds and resend the message — there is no need to create a new session."
+      "intro": "Another Codex turn or client is writing to this conversation. This send could not start.",
+      "reason": "Stop the turn in the client using this conversation, then send again after it has ended."
     },
     "codexThreadResume": {
       "title": "Session thread is no longer valid",

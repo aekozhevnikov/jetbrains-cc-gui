@@ -38,6 +38,29 @@ export function shouldShowModelSearch(modelCount: number, searchQuery: string): 
   return modelCount >= MODEL_SEARCH_THRESHOLD || searchQuery.trim().length > 0;
 }
 
+/** Split a search query into lowercase, whitespace-separated tokens. */
+export function tokenizeSearchQuery(query: string): string[] {
+  return query.trim().toLowerCase().split(/\s+/).filter((token) => token.length > 0);
+}
+
+/** Searchable text fields of a model row. */
+export interface ModelSearchFields {
+  id: string;
+  label: string;
+  description?: string;
+}
+
+/**
+ * AND-match every token against the id/label/description, case-insensitive
+ * substring. "son 4" finds "Sonnet 4.6"; each token may match a different
+ * field than its neighbours.
+ */
+export function modelMatchesSearchQuery(tokens: string[], fields: ModelSearchFields): boolean {
+  if (tokens.length === 0) return true;
+  const haystacks = [fields.id, fields.label, fields.description ?? ''].map((text) => text.toLowerCase());
+  return tokens.every((token) => haystacks.some((haystack) => haystack.includes(token)));
+}
+
 /**
  * Whether the list should render provider section headers.
  * Only when at least two distinct non-empty provider prefixes exist.

@@ -79,6 +79,99 @@ test('native auto mode: Bash yields "continue" so the SDK classifier reviews it'
   assert.equal(result?.continue, true);
 });
 
+test('subagents in native auto mode yield to the classifier even when the parent is default or plan', async () => {
+  for (const parentMode of ['default', 'plan', 'acceptEdits', 'auto']) {
+    const hook = makeHook(parentMode);
+    for (const toolName of ['Bash', 'Write', 'mcp__server__execute']) {
+      const result = await hook({
+        agent_id: 'worker-1',
+        permission_mode: 'auto',
+        tool_name: toolName,
+        tool_input: { command: 'date' },
+      });
+      assert.deepEqual(result, { continue: true });
+    }
+  }
+});
+
+test('a worker with a stricter mode does not inherit the parent auto approval policy', async () => {
+  for (const mode of ['default', 'acceptEdits']) {
+    const result = await makeHook('auto')({
+      agent_id: 'worker-1', permission_mode: mode,
+      tool_name: 'Bash', tool_input: { command: 'date' },
+    });
+    assert.equal(result?.hookSpecificOutput?.permissionDecision, 'ask');
+  }
+});
+
+test('worker planning tools never change parent SDK mode or open a parent plan approval', async () => {
+  const state = { value: 'auto' };
+  const transitions = [];
+  const hook = createPreToolUseHook(state, '/tmp/test-cwd', async mode => transitions.push(mode));
+  for (const toolName of ['EnterPlanMode', 'ExitPlanMode']) {
+    const result = await hook({
+      agent_id: 'worker-1', permission_mode: 'plan',
+      tool_name: toolName, tool_input: {},
+    });
+    assertSdkAcceptsHookOutput(result);
+    assert.deepEqual(result, { continue: true });
+    assert.equal(state.value, 'auto');
+  }
+  assert.deepEqual(transitions, []);
+  assert.deepEqual(await hook({ tool_name: 'Bash', tool_input: { command: 'date' } }), { continue: true });
+});
+
+test('main-thread agent_type and unknown worker modes do not override the parent policy', async () => {
+  for (const identity of [
+    { agent_type: 'custom', permission_mode: 'auto' },
+    { agent_id: 'worker-1', permission_mode: 'unknown' },
+    { agent_id: 'worker-1' },
+  ]) {
+    const result = await makeHook('default')({ ...identity, tool_name: 'Bash', tool_input: { command: 'date' } });
+    assert.equal(result?.hookSpecificOutput?.permissionDecision, 'ask');
+  }
+});
+
+test('SDK-only worker modes retain their native permission flow instead of inheriting parent plan approvals', async () => {
+  for (const permissionMode of ['dontAsk', 'bubble']) {
+    const state = { value: 'plan' };
+    const hook = createPreToolUseHook(state, '/tmp/test-cwd');
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: '/tmp/test-cwd/PLAN.md', content: 'worker plan' }],
+      ['Agent', { prompt: 'inspect the project' }],
+    ]) {
+      const result = await hook({
+        agent_id: 'worker-1', permission_mode: permissionMode,
+        tool_name: toolName, tool_input: toolInput,
+      });
+      assertSdkAcceptsHookOutput(result);
+      assert.deepEqual(result, { continue: true });
+      assert.equal(state.value, 'plan');
+    }
+  }
+});
+
+test('worker plan mode leaves tool restrictions and plan-file ownership to the SDK', async () => {
+  for (const parentMode of ['default', 'plan', 'auto', 'bypassPermissions']) {
+    const state = { value: parentMode };
+    const hook = createPreToolUseHook(state, '/tmp/test-cwd');
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: '/tmp/test-cwd/PLAN.md', content: 'worker plan' }],
+      ['Agent', { prompt: 'inspect the project' }],
+      ['Task', { prompt: 'inspect the project' }],
+      ['Bash', { command: 'date' }],
+    ]) {
+      const result = await hook({
+        agent_id: 'worker-1', permission_mode: 'plan',
+        tool_name: toolName, tool_input: toolInput,
+      });
+      assertSdkAcceptsHookOutput(result);
+      assert.deepEqual(result, { continue: true });
+      assert.equal(state.value, parentMode);
+    }
+  }
+});
+
 test('bypassPermissions mode: Bash yields "continue" (SDK mode-check auto-allows)', async () => {
   const hook = makeHook('bypassPermissions');
   const result = await hook({

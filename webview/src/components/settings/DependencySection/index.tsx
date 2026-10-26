@@ -82,6 +82,21 @@ const DependencySection = ({ addToast, isActive }: DependencySectionProps) => {
         )}
       </div>
 
+      {/* Codex was migrated from SDK install to the locally installed Codex CLI
+          (detected under Providers → CLI), so no Codex card is listed above.
+          Keep a permanent notice so the missing entry does not look like a bug. */}
+      <div className={styles.sdkMigrationNote}>
+        <span className="codicon codicon-arrow-right" />
+        <div className={styles.migrationBody}>
+          <span className={styles.migrationTitle}>
+            {t('settings.dependency.codexMigratedTitle')}
+          </span>
+          <span className={styles.migrationDesc}>
+            {t('settings.dependency.codexMigratedDesc')}
+          </span>
+        </div>
+      </div>
+
       {/* Install Logs */}
       {showLogs && (
         <InstallLogs logs={installLogs} onClose={() => setShowLogs(false)} />

@@ -82,6 +82,7 @@
     "disabled": "अक्षम",
     "sdkNotInstalled": "{{provider}} SDK इंस्टॉल नहीं है। चैट शुरू करने के लिए कृपया SDK इंस्टॉल करें।",
     "sdkStatusLoading": "Checking SDK status...",
+    "pasteImagePreparing": "पेस्ट की गई छवि तैयार हो रही है...",
     "sdkStatusUnavailable": "SDK स्थिति की जांच नहीं हो सकी।",
     "retrySdkStatus": "पुनः प्रयास करें",
     "openSourceBanner": "यह प्रोजेक्ट 100% ओपन सोर्स और मुफ़्त है (नकली प्रोजेक्ट से सावधान रहें)",
@@ -119,6 +120,7 @@
       "openTooltip": "बातचीत में खोजें (Cmd/Ctrl+F)"
     },
     "compactSummary": {
+      "receivedTime": "दर्ज समय",
       "summarizedConversation": "सारांशित वार्तालाप",
       "compactSummary": "संक्षिप्त सारांश",
       "messagesUpTo": "इस बिंदु तक के {{count}} संदेश सारांशित किए गए",
@@ -126,7 +128,7 @@
       "userContext": "संदर्भ: \"{{context}}\"",
       "expand": "सारांश विस्तृत करें",
       "collapse": "सारांश संक्षिप्त करें",
-      "receivedTime": "दर्ज समय",
+"receivedTime": "दर्ज समय",
       "nativeCompleted": "संदर्भ संक्षिप्त किया गया",
       "nativeInProgress": "संदर्भ संक्षिप्त हो रहा है",
       "nativeFailed": "संक्षेपण विफल",
@@ -137,8 +139,8 @@
       "timeUnknown": "समय अज्ञात",
       "turnTime": "टर्न का आरंभ समय"
     },
-    "pasteImagePreparing": "पेस्ट की गई छवि तैयार हो रही है...",
-    "codexCompactUsage": "Use /compact without arguments",
+"pasteImagePreparing": "पेस्ट की गई छवि तैयार हो रही है...",
+"codexCompactUsage": "Use /compact without arguments",
     "codexCompactStarted": "Codex is compacting the conversation",
     "codexReviewUsage": "Use /review without arguments",
     "codexReviewStarted": "Codex is reviewing the workspace",
@@ -418,8 +420,8 @@
       "installPolicyTip": "इंस्टॉलेशन में समस्या? त्रुटि को टर्मिनल CLI AI में कॉपी करके हल करें",
       "claudeSdkName": "Claude Code SDK",
       "claudeSdkDescription": "Claude AI सुविधाओं के लिए आवश्यक। Claude Code SDK और संबंधित निर्भरताएं शामिल हैं।",
-      "codexSdkName": "Codex SDK",
-      "codexSdkDescription": "Codex AI सुविधाओं के लिए आवश्यक। OpenAI Codex SDK शामिल है।",
+      "codexMigratedTitle": "Codex अब प्रदाता प्रबंधन → CLI में है",
+      "codexMigratedDesc": "Codex अब यहाँ SDK इंस्टॉल नहीं करता। यह आपके कंप्यूटर पर पहले से इंस्टॉल Codex CLI (@openai/codex) का उपयोग करता है और चैट आधिकारिक app-server के माध्यम से चलती है। इसकी स्थिति प्रदाता प्रबंधन → CLI में देखें; अगर यह इंस्टॉल नहीं है, तो टर्मिनल में npm install -g @openai/codex चलाएँ और फिर उस पेज पर Re-check दबाएँ।",
       "loading": "निर्भरता स्थिति लोड हो रही है...",
       "install": "इंस्टॉल करें",
       "installing": "इंस्टॉल हो रहा है...",
@@ -436,7 +438,7 @@
       "uninstallFailed": "अनइंस्टॉल विफल: {{error}}",
       "updating": "अपडेट हो रहा है...",
       "updateSuccess": "{{name}} सफलतापूर्वक अपडेट हो गया",
-      "codexMigratedTitle": "Codex अब प्रदाता प्रबंधन → CLI में है",
+"codexMigratedTitle": "Codex अब प्रदाता प्रबंधन → CLI में है",
       "codexMigratedDesc": "Codex अब यहाँ SDK इंस्टॉल नहीं करता। यह आपके कंप्यूटर पर पहले से इंस्टॉल Codex CLI (@openai/codex) का उपयोग करता है और चैट आधिकारिक app-server के माध्यम से चलती है। इसकी स्थिति प्रदाता प्रबंधन → CLI में देखें; अगर यह इंस्टॉल नहीं है, तो टर्मिनल में npm install -g @openai/codex चलाएँ और फिर उस पेज पर Re-check दबाएँ।",
       "cliTransportBadge": "CLI · {{transport}}"
     },
@@ -879,6 +881,10 @@
       "copied": "Copied to clipboard",
       "copyFailed": "Failed to copy",
       "tools": {
+        "codex": {
+          "name": "Codex CLI",
+          "description": "स्थापित Codex CLI का पता लगाता है। संस्करण जाँच खाता कॉन्फ़िगरेशन नहीं पढ़ती; चैट app-server का उपयोग करती है।"
+        },
         "minimax": {
           "name": "MiniMax Code",
           "description": "MiniMax terminal coding agent. Node.js 22.19+ / 24+ (23 नहीं) आवश्यक; कमांड: minimax / mcode"
@@ -977,7 +983,9 @@
     "noSessions": "कोई इतिहास सत्र नहीं",
     "noSessionsDesc": "वर्तमान परियोजना में सत्र रिकॉर्ड नहीं मिले",
     "totalSessions": "कुल {{count}} सत्र · {{total}} संदेश",
+    "totalSessionsOnly": "कुल {{count}} सत्र",
     "messageCount": "{{count}} संदेश",
+    "messageCountUnknown": "संदेश संख्या उपलब्ध नहीं",
     "searchPlaceholder": "सत्र शीर्षक खोजें...",
     "noSearchResults": "कोई मिलान सत्र नहीं मिला",
     "tryOtherKeywords": "अन्य खोज कीवर्ड आज़माएं",
@@ -1033,11 +1041,11 @@
       "claude-vscode": "यह सत्र VS Code एक्सटेंशन द्वारा बनाया गया था और CLI में डिफ़ॉल्ट रूप से नहीं दिखाया गया है। टर्मिनल CLI की /resume सूची में इसे दिखाने के लिए 'CLI में कनवर्ट करें' पर क्लिक करें",
       "remote": "यह सत्र Claude Code के रिमोट इंस्टेंस द्वारा बनाया गया था"
     },
-    "convertActiveHint": "सत्र समाप्त होने के बाद CLI में रूपांतरित करें",
+"convertActiveHint": "सत्र समाप्त होने के बाद CLI में रूपांतरित करें",
     "convertActiveHintTooltip": "पहले यह सत्र समाप्त या बंद करें, फिर इसे इतिहास से रूपांतरित करें",
     "totalSessionsOnly": "कुल {{count}} सत्र",
     "messageCountUnknown": "संदेश संख्या उपलब्ध नहीं",
-    "loadMore": "Load more"
+"loadMore": "Load more"
   },
   "permission": {
     "dialogTitle": "अनुमति अनुरोध",
@@ -1125,6 +1133,19 @@
       "loading": "प्रदाता लोड हो रहे हैं...",
       "empty": "कोई प्रदाता उपलब्ध नहीं",
       "switched": "{{provider}} पर स्विच किया गया"
+    },
+    "codexQuota": {
+      "title": "Codex कोटा",
+      "loading": "कोटा लोड हो रहा है...",
+      "unavailable": "कोटा उपलब्ध नहीं है",
+      "lastUpdated": "{{value}} को अपडेट किया गया",
+      "fiveHour": "5 घंटे का उपयोग",
+      "weekly": "साप्ताहिक उपयोग",
+      "windowRemainingPercent": "{{percent}}% शेष",
+      "windowRemainingPercentWithReset": "{{percent}}% शेष · {{value}} को रीसेट",
+      "windowUsedOnly": "{{used}} उपयोग किया गया",
+      "windowUnavailable": "अनुपलब्ध",
+      "apiKeyMode": "API कुंजी मोड में सदस्यता कोटा नहीं है"
     },
     "nodeProcesses": {
       "title": "Node प्रक्रिया प्रबंधक",
@@ -1401,6 +1422,20 @@
   "tools": {
     "toolCall": "उपकरण कॉल",
     "runCommand": "कमांड चलाएं",
+    "commandRead": "{{path}} पढ़ें",
+    "commandList": "{{path}} की सूची",
+    "commandSearch": "{{path}} में {{query}} खोजें",
+    "commandApprovalReason": "स्वीकृति का कारण",
+    "patchToggleDiff": "बदलाव देखें",
+    "errorOutput": "त्रुटि का विवरण",
+    "resultUnknown": "इस टूल का अलग परिणाम उपलब्ध नहीं है",
+    "patchNoDiff": "अंतर उपलब्ध नहीं",
+    "patchKind": {
+      "add": "जोड़ा गया",
+      "delete": "हटाया गया",
+      "update": "बदला गया",
+      "move": "स्थानांतरित"
+    },
     "contextEngine": "संदर्भ इंजन",
     "task": "कार्य",
     "promptLabel": "प्रॉम्प्ट",
@@ -1677,7 +1712,9 @@
   "models": {
     "addModel": "मॉडल जोड़ें",
     "searchPlaceholder": "मॉडल खोजें",
+    "clearSearch": "सर्च साफ़ करें",
     "noModelsFound": "कोई मॉडल नहीं मिला",
+    "noSearchMatches": "\"{{query}}\" से मेल खाता कोई मॉडल नहीं मिला",
     "hiddenModelCount": "+ {{count}} और मॉडल. खोजने के लिए टाइप करें.",
     "pinned": "पिन किए गए",
     "pin": "पिन करें",
@@ -1692,6 +1729,10 @@
       "sonnet5": {
         "label": "Sonnet 5",
         "description": "Sonnet 5 · डिफ़ॉल्ट अनुशंसित मॉडल"
+      },
+      "sonnet55": {
+        "label": "Sonnet 5.5",
+        "description": "Sonnet 5.5 · नवीनतम Sonnet अपग्रेड"
       },
       "opus55": {
         "label": "Opus 5.5",
@@ -1732,6 +1773,10 @@
       "gpt6astra": {
         "label": "GPT-6 Astra",
         "description": "स्वायत्त कंप्यूटर उपयोग और लंबे एजेंटिक कार्यों के लिए नई पीढ़ी का फ्लैगशिप मॉडल।"
+      },
+      "gpt61sol": {
+        "label": "GPT-6.1 Sol",
+        "description": "जटिल पेशेवर कार्यों के लिए GPT-6.1 फ्रंटियर मॉडल।"
       },
       "gpt6sol": {
         "label": "GPT-6 Sol",
@@ -1798,6 +1843,20 @@
       "description": "पूरी तरह स्वचालित, सभी अनुमति जाँचों को बायपास करता है [सावधानी से उपयोग करें]"
     }
   },
+  "workspaceDiff": {
+    "title": "वर्कस्पेस परिवर्तन",
+    "staged": "स्टेज किए गए",
+    "unstaged": "अनस्टेज किए गए",
+    "untracked": "अनट्रैक किए गए",
+    "noChanges": "कोई परिवर्तन नहीं मिला",
+    "binary": "बाइनरी",
+    "truncated": "वर्कस्पेस स्नैपशॉट बहुत बड़ा था, काट दिया गया",
+    "notGit": "वर्तमान डायरेक्टरी Git वर्किंग ट्री नहीं है",
+    "refresh": "रिफ्रेश",
+    "fileCount": "{{count}} फ़ाइलें",
+    "fileCount_one": "{{count}} फ़ाइल",
+    "fileCount_other": "{{count}} फ़ाइलें"
+  },
   "codexModes": {
     "default": {
       "label": "Suggest (approval)",
@@ -1806,8 +1865,8 @@
     },
     "plan": {
       "label": "Plan Mode",
-      "tooltip": "Plan mode - read-only analysis",
-      "description": "Uses only read-only tools, generates plan for user approval"
+      "tooltip": "नेटिव सहयोग प्लान मोड",
+      "description": "कार्यान्वयन से पहले नेटिव प्लान बनाता है; सैंडबॉक्स और अनुमोदन स्वतंत्र रहते हैं"
     },
     "acceptEdits": {
       "label": "Auto Edit",
@@ -2012,8 +2071,8 @@
     "recommended": "अनुशंसित",
     "codexWriterConflict": {
       "title": "Codex थ्रेड व्यस्त है",
-      "intro": "जब नया टर्न शुरू हुआ, पिछले टर्न की Codex प्रक्रिया अभी इस थ्रेड में लिख रही थी। प्लगइन अब भेजने से पहले पिछले टर्न को स्वतः रोक देता है।",
-      "reason": "कुछ सेकंड प्रतीक्षा करें और संदेश दोबारा भेजें — नया सेशन बनाने की आवश्यकता नहीं है।"
+      "intro": "कोई अन्य Codex टर्न या क्लाइंट इस बातचीत में लिख रहा है। यह संदेश भेजना शुरू नहीं हो सका।",
+      "reason": "इस बातचीत का उपयोग कर रहे क्लाइंट में टर्न रोकें और उसके समाप्त होने के बाद फिर से भेजें।"
     },
     "codexThreadResume": {
       "title": "सत्र थ्रेड अब मान्य नहीं है",

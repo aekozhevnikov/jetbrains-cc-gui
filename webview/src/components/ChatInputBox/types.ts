@@ -6,6 +6,7 @@
 // ============================================================
 // Core Entity Types
 // ============================================================
+import { pickerModelSupports1MContext } from '../../utils/claudeModelCapabilities';
 
 /**
  * File tag information for backend context injection (Codex mode)
@@ -94,6 +95,8 @@ export interface DropdownItemData {
   label: string;
   /** Description text */
   description?: string;
+  /** Native catalog effort metadata when the provider exposes it. */
+  supportedReasoningEfforts?: string[];
   /** Icon class name */
   icon?: string;
   /** Item type */
@@ -126,6 +129,8 @@ export interface FileItem {
  * Command item (returned from Java)
  */
 export interface CommandItem {
+  /** Original path from the native Codex skill catalog. */
+  nativeSkillPath?: string;
   /** Command identifier */
   id: string;
   /** Display name */
@@ -288,18 +293,23 @@ export interface ModelInfo {
   id: string;
   label: string;
   description?: string;
+  /** Native Codex reasoning efforts advertised by model/list. */
+  supportedReasoningEfforts?: string[];
+  /** Explicit context capability advertised by the Claude settings picker. */
+  supports1MContext?: boolean;
   /** True for user-defined models (Settings → custom models). */
   isCustom?: boolean;
 }
 
 /**
  * Check if a model supports 1M context window.
- * All models support 1M except Haiku (matched by name substring).
+ * Gateway routes require an explicit picker capability; built-ins retain their defaults.
  */
 export function modelSupports1MContext(modelId: string | undefined | null): boolean {
   if (!modelId) {
     return false;
   }
+  if (modelId.startsWith('ccs-claude-')) return pickerModelSupports1MContext(modelId);
   return !modelId.replace(/\[1m\]$/i, '').toLowerCase().includes('haiku');
 }
 
@@ -423,6 +433,11 @@ export const CLAUDE_MODELS: ModelInfo[] = [
     description: 'Opus 5 · Previous Opus generation',
   },
   {
+    id: 'claude-sonnet-5-5',
+    label: 'Sonnet 5.5',
+    description: 'Sonnet 5.5 · Latest Sonnet upgrade',
+  },
+  {
     id: 'claude-sonnet-5',
     label: 'Sonnet 5',
     description: 'Sonnet 5 · Use the default model',
@@ -442,6 +457,11 @@ export const CODEX_MODELS: ModelInfo[] = [
     id: 'gpt-6-astra',
     label: 'GPT-6 Astra',
     description: 'New-generation flagship for autonomous computer use and long agentic tasks.',
+  },
+  {
+    id: 'gpt-6.1-sol',
+    label: 'GPT-6.1 Sol',
+    description: 'GPT-6.1 frontier model for complex professional work.',
   },
   {
     id: 'gpt-6-sol',
@@ -734,6 +754,7 @@ export const EFFORT_SUPPORTED_CLAUDE_MODELS = new Set([
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5-5',
   'claude-sonnet-5',
   'claude-sonnet-4-7',
   'claude-sonnet-4-6',
@@ -761,6 +782,7 @@ export const MAX_EFFORT_CLAUDE_MODELS = new Set([
   'claude-opus-4-8',
   'claude-opus-4-6',
   'claude-opus-4-6[1m]',
+  'claude-sonnet-5-5',
   'claude-sonnet-5',
   'claude-sonnet-4-7',
   'claude-sonnet-4-6',

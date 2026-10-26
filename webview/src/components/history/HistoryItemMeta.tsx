@@ -4,6 +4,7 @@ import { formatFileSize, CONVERTIBLE_ENTRYPOINTS } from './historyItemUtils';
 import { HistoryEntrypointBadge } from './HistoryEntrypointBadge';
 import { HistorySessionIdCopy } from './HistorySessionIdCopy';
 import { HistoryConvertButton } from './HistoryConvertButton';
+import { isKnownHistoryMessageCount } from '../../utils/historyMessageCount';
 
 export interface HistoryItemMetaProps {
   session: HistorySessionSummary;
@@ -36,7 +37,8 @@ export const HistoryItemMeta = ({
 
   return (
     <div className="history-item-meta">
-      <span>{t('history.messageCount', { count: session.messageCount })}</span>
+      <span>{isKnownHistoryMessageCount(session.messageCount)
+        ? t('history.messageCount', { count: session.messageCount }) : t('history.messageCountUnknown')}</span>
       {fileSize ? (
         <>
           <span className="history-meta-dot">•</span>

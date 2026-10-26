@@ -9,9 +9,9 @@ const translations: Record<string, string> = {
   'settings.dependency.installPolicyTip': '安装遇到问题？可将报错复制给终端 CLI AI 解决',
   'settings.dependency.loading': '加载中',
   'settings.dependency.claudeSdkName': 'Claude Code SDK',
-  'settings.dependency.codexSdkName': 'Codex SDK',
+  'settings.dependency.codexMigratedTitle': 'Codex 已迁移到「供应商管理 → CLI」',
+  'settings.dependency.codexMigratedDesc': 'Codex 不再从这里安装 SDK。',
   'settings.dependency.claudeSdkDescription': 'Claude AI 功能所需。包含 Claude Code SDK 及相关依赖。',
-  'settings.dependency.codexSdkDescription': 'Codex AI 功能所需。包含 OpenAI Codex SDK。',
   'settings.dependency.targetVersion': '目标版本',
   'settings.dependency.loadingVersions': '版本列表加载中',
   'settings.dependency.installedVersion': '当前版本 {{version}}',
@@ -54,6 +54,15 @@ describe('DependencySection', () => {
 
   afterEach(() => {
     window.dispatchEvent(new Event('pagehide'));
+  });
+
+  it('explains that Codex moved to the CLI section instead of listing a Codex SDK card', () => {
+    render(<DependencySection isActive={false} />);
+
+    expect(screen.getByText(translations['settings.dependency.codexMigratedTitle'])).toBeTruthy();
+    expect(screen.getByText(translations['settings.dependency.codexMigratedDesc'])).toBeTruthy();
+    expect(screen.queryByText('Codex SDK')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Codex SDK' })).toBeNull();
   });
 
   it('shows an error state with manual retry instead of SDK install actions', () => {
@@ -166,10 +175,11 @@ describe('DependencySection', () => {
     });
 
     expect(screen.queryByText('自定义版本')).toBeNull();
-    expect(screen.getAllByText('目标版本')).toHaveLength(2);
+    expect(screen.getAllByText('目标版本')).toHaveLength(1);
+    expect(screen.queryByText('Codex SDK')).toBeNull();
     expect(screen.queryByRole('combobox')).toBeNull();
     expect(screen.getByRole('button', { name: '目标版本 v0.2.89' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: '目标版本 v0.118.0' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '目标版本 v0.118.0' })).toBeNull();
     expect(screen.getByRole('button', { name: '当前版本' })).toBeTruthy();
     expect(screen.getAllByRole('button', { name: '卸载' })).toHaveLength(1);
   });

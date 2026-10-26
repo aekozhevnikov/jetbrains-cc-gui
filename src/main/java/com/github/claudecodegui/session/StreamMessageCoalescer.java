@@ -809,9 +809,8 @@ public class StreamMessageCoalescer {
                 || previous.type == current.type
                 && previous.timestamp == current.timestamp
                 && Objects.equals(previous.content, current.content)
-                && Objects.equals(
-                        computeMessageStructuralSignature(previous.raw),
-                        computeMessageStructuralSignature(current.raw));
+                // Scheduling may ignore text deltas, but suffix transport must include every raw correction.
+                && Objects.equals(previous.raw, current.raw);
     }
 
     /**
@@ -981,7 +980,9 @@ public class StreamMessageCoalescer {
             return false;
         }
         String provider = context.getCurrentProvider();
-        return "claude".equals(provider) || "codex".equals(provider) || "grok".equals(provider)
+        // Codex item snapshots carry the entire growing text/thinking block.
+        // Skipping their text-only updates would wait for a delta that never arrives.
+        return "claude".equals(provider) || "grok".equals(provider)
                 || "zcode".equals(provider);
     }
 

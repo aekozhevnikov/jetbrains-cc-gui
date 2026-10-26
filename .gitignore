@@ -56,6 +56,7 @@ webview/test-results/
 webview/playwright-report/
 
 src/main/resources/html/*
+src/main/resources/webview/assets/
 
 .specify
 .claude
@@ -68,6 +69,9 @@ CLAUDE.md
 webview/src/version/version.ts
 AGENTS.md
 openspec/
+
+# Local protocol snapshots regenerated from the installed Codex CLI
+docs/codex/app-server-protocol/generated/
 
 # 自定义沙箱目录（如果启用）
 .sandbox/

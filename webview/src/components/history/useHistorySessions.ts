@@ -76,7 +76,7 @@ export const useHistorySessions = (historyData: HistoryData | null, searchQuery:
 
     // Merge: favorited first, unfavorited after
     return [...favorited, ...unfavorited];
-  }, [allSessions, searchQuery]);
+  }, [historyData?.sessions, historyData?.source, searchQuery]);
 
   const infoBar = !historyData
     ? ''
