@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { normalizeClaudeModelId, strip1MContextSuffix } from '../types';
 import type { ModelInfo } from '../types';
@@ -7,8 +7,10 @@ import { resolveModelDescription, resolveModelDisplayLabel } from '../modelLabel
 import {
   buildModelDropdownSections,
   MAX_VISIBLE_MODEL_OPTIONS,
+  modelMatchesSearchQuery,
   readPinnedModelIds,
   shouldShowModelSearch,
+  tokenizeSearchQuery,
 } from '../modelSelectUtils';
 
 interface UseModelSelectStateArgs {
@@ -26,6 +28,8 @@ export function useModelSelectState({ value, models, currentProvider, longContex
   const { t } = useTranslation();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  // Keyboard-navigated row while the search input is focused; -1 = none.
+  const [highlightIndex, setHighlightIndex] = useState(-1);
   const [pinnedIds, setPinnedIds] = useState<string[]>(() => readPinnedModelIds(currentProvider));
   const deferredSearchQuery = useDeferredValue(searchQuery);
 
@@ -76,13 +80,13 @@ export function useModelSelectState({ value, models, currentProvider, longContex
     return resolveModelDescription(model, t);
   };
 
-  const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase();
-  const filteredModels = normalizedSearchQuery
-    ? models.filter((model) => {
-        const label = getModelLabel(model, false);
-        const description = getModelDescription(model) ?? '';
-        return [model.id, label, description].some((text) => text.toLowerCase().includes(normalizedSearchQuery));
-      })
+  const searchTokens = useMemo(() => tokenizeSearchQuery(deferredSearchQuery), [deferredSearchQuery]);
+  const filteredModels = searchTokens.length > 0
+    ? models.filter((model) => modelMatchesSearchQuery(searchTokens, {
+        id: model.id,
+        label: getModelLabel(model, false),
+        description: getModelDescription(model),
+      }))
     : models;
 
   const { sections, hiddenCount: hiddenModelCount } = buildModelDropdownSections(filteredModels, pinnedIds, {
@@ -92,12 +96,47 @@ export function useModelSelectState({ value, models, currentProvider, longContex
   const showSearch = shouldShowModelSearch(models.length, searchQuery);
   const pinnedSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
 
+  // Rows in rendered order (sections flattened) drive keyboard navigation.
+  const flatVisibleModelIds = useMemo(
+    () => sections.flatMap((section) => section.models.map((model) => model.id)),
+    [sections],
+  );
+  const searchActive = searchTokens.length > 0;
+
+  // Typing restarts navigation; reopening the dropdown does too.
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [deferredSearchQuery, isOpen]);
+
+  const moveHighlight = useCallback((delta: 1 | -1) => {
+    const count = flatVisibleModelIds.length;
+    if (count === 0) return;
+    setHighlightIndex((prev) => {
+      const current = prev >= 0 && prev < count ? prev : searchActive ? 0 : -1;
+      if (current < 0) return delta > 0 ? 0 : count - 1;
+      return (current + delta + count) % count;
+    });
+  }, [flatVisibleModelIds, searchActive]);
+
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
+
+  const activeHighlightIndex = highlightIndex >= 0 && highlightIndex < flatVisibleModelIds.length
+    ? highlightIndex
+    : -1;
+  // While searching, the first hit is pre-selected so Enter picks it directly.
+  const highlightedModelId = flatVisibleModelIds[
+    activeHighlightIndex >= 0 ? activeHighlightIndex : searchActive ? 0 : -1
+  ] ?? null;
+
   return {
     t,
     isOpen,
     setIsOpen,
     searchQuery,
     setSearchQuery,
+    clearSearch,
     pinnedIds,
     setPinnedIds,
     pinnedSet,
@@ -111,5 +150,7 @@ export function useModelSelectState({ value, models, currentProvider, longContex
     hiddenModelCount,
     visibleModelCount,
     showSearch,
+    highlightedModelId,
+    moveHighlight,
   };
 }

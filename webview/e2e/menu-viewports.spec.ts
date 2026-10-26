@@ -368,7 +368,7 @@ for (const fontSizeLevel of [3, 6]) {
   });
 }
 
-test('Codex auto review appears only after the SDK confirms support', async ({ page }) => {
+test('Codex native auto review is independent of the legacy SDK status', async ({ page }) => {
   await page.addInitScript(() => {
     // JCEF sets this before user changes can be persisted across tabs.
     window.__CCGUI_PAGE_CONTEXT_READY__ = true;
@@ -379,26 +379,23 @@ test('Codex auto review appears only after the SDK confirms support', async ({ p
   await expect(page.locator('.button-area').first()).toHaveAttribute('data-provider', 'codex');
   await page.locator('.button-area-left .selector-button').nth(2).click();
   await expect(page.getByTestId('mode-option-default')).toBeVisible();
-  await expect(page.getByTestId('mode-option-auto')).toHaveCount(0);
-
-  await page.evaluate(() => window.updateDependencyStatus?.(JSON.stringify({
-    'codex-sdk': { installed: true, meetsMinimumVersion: true },
-  })));
   await expect(page.getByTestId('mode-option-auto')).toBeVisible();
   await page.getByTestId('mode-option-auto').click();
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('model-selection-state') || '{}',
   ).codexPermissionMode)).toBe('auto');
 
+  // The legacy dependency callback may still report package metadata, but it
+  // must not revoke the app-server native capability.
   await page.evaluate(() => window.updateDependencyStatus?.(JSON.stringify({
     'codex-sdk': { installed: true, meetsMinimumVersion: false },
   })));
   await expect.poll(() => page.evaluate(() => JSON.parse(
     localStorage.getItem('model-selection-state') || '{}',
-  ).codexPermissionMode)).toBe('default');
+  ).codexPermissionMode)).toBe('auto');
   await page.locator('.button-area-left .selector-button').nth(2).click();
   await expect(page.getByTestId('mode-option-default')).toBeVisible();
-  await expect(page.getByTestId('mode-option-auto')).toHaveCount(0);
+  await expect(page.getByTestId('mode-option-auto')).toBeVisible();
 });
 
 test('config submenus stay visible across constrained viewports', async ({ page }) => {
@@ -502,3 +499,39 @@ test('large model selector remains searchable and capped', async ({ page }) => {
 
   expect(significantErrors(errors)).toEqual([]);
 });
+
+for (const fontSizeLevel of [2, 3, 6]) {
+  test(`reasoning submenu stays attached at font level ${fontSizeLevel}`, async ({ page }, testInfo) => {
+    const errors = collectPageErrors(page);
+    await page.setViewportSize({ width: 496, height: 340 });
+    await page.addInitScript((level) => {
+      localStorage.setItem('fontSizeLevel', String(level));
+      const saved = JSON.parse(localStorage.getItem('model-selection-state') || '{}');
+      localStorage.setItem('model-selection-state', JSON.stringify({
+        ...saved, provider: 'codex', codexModel: 'gpt-5.6-sol',
+      }));
+    }, fontSizeLevel);
+    await page.goto('/');
+    await page.getByTestId('model-config-trigger').click();
+    const effortRow = page.getByTestId('model-config-option-effort');
+    await effortRow.click();
+    const submenu = page.getByTestId('reasoning-selector-dropdown');
+    await expect(submenu.locator('.selector-option')).toHaveCount(5);
+
+    // Geometry must settle after the entrance animation before testing attachment.
+    await submenu.evaluate((element) => Promise.all(element.getAnimations().map(animation => animation.finished)));
+    await expectInsideViewport(page, submenu, 'reasoning submenu');
+    await expectSubmenuAnchoredToRow(page, effortRow, submenu, 'reasoning submenu');
+    await page.screenshot({ path: testInfo.outputPath('reasoning-menu.png'), animations: 'disabled' });
+
+    await page.setViewportSize({ width: 393, height: 300 });
+    await expect(async () => {
+      await expectInsideViewport(page, submenu, 'resized reasoning submenu');
+      await expectSubmenuAnchoredToRow(page, effortRow, submenu, 'resized reasoning submenu');
+    }).toPass({ timeout: 5_000 });
+    await submenu.locator('.selector-option').last().click();
+    await expect(submenu).toHaveCount(0);
+    await expect(page.getByTestId('model-config-trigger')).toContainText(/max/i);
+    expect(significantErrors(errors)).toEqual([]);
+  });
+}

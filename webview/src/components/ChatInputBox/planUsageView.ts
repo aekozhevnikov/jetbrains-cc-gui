@@ -2,7 +2,6 @@ import type { TFunction } from 'i18next';
 import {
   clampPercent,
   formatFullReset,
-  formatShortReset,
   paceColor,
   resolveTimeBudget,
   windowShortLabel,
@@ -25,7 +24,6 @@ export interface PlanUsageView {
   tp: number;
   color: PaceColor;
   worstColor: PaceColor;
-  shortReset: string;
   fullReset: string;
   winLabel: string;
 }
@@ -50,10 +48,16 @@ export function derivePlanUsageView(
     : null;
   const color = present ? paceColor(tp, tt) : 'neutral';
   const worstColor = present && snapshot ? worstPaceColor(snapshot) : 'neutral';
-  const shortReset = present ? formatShortReset(display!.resetAt, language) : '';
   const fullReset = present ? formatFullReset(display!.resetAt, language) : '';
   const winLabel = windowShortLabel(display?.windowId || display?.periodType);
-  return { present, tp, color, worstColor, shortReset, fullReset, winLabel };
+  return { present, tp, color, worstColor, fullReset, winLabel };
+}
+
+/** Use the same percentage in the summary and details, including tiny usage. */
+export function formatPlanUsagePercent(value: number): string {
+  const pct = clampPercent(value);
+  const rounded = Math.round(pct);
+  return pct > 0 && rounded === 0 ? '<1%' : `${rounded}%`;
 }
 
 export interface PlanUsageTooltipArgs {
@@ -65,6 +69,7 @@ export interface PlanUsageTooltipArgs {
   windows: CapacityWindow[];
   worstColor: PaceColor;
   color: PaceColor;
+  language: string;
   t: TFunction;
 }
 
@@ -78,45 +83,44 @@ export function buildPlanUsageTooltip({
   windows,
   worstColor,
   color,
+  language,
   t,
 }: PlanUsageTooltipArgs): string {
   if (!present) {
     return snapshot?.message
       || t('chat.planUsage.unavailable', { defaultValue: 'Usage unavailable' });
   }
-  const pct = Math.round(tp);
   const period = display?.periodType || display?.windowId || 'limit';
-  const lines: string[] = [];
+  const lines = [t('chat.planUsage.title', { defaultValue: 'Claude plan usage' })];
   if (snapshot?.level) {
     lines.push(snapshot.level.toUpperCase());
   }
-  if (fullReset) {
-    lines.push(
-      t('chat.planUsage.tooltipWindowWithReset', {
-        period,
-        percent: pct,
-        value: fullReset,
-        defaultValue: '{{period}} {{percent}}% · Resets {{value}}',
-      }),
-    );
-  } else {
+  const appendWindow = (windowPeriod: string, usedPct: number, reset: string) => {
     lines.push(
       t('chat.planUsage.tooltipWindow', {
-        period,
-        percent: pct,
-        defaultValue: '{{period}} {{percent}}%',
+        period: windowPeriod,
+        percent: formatPlanUsagePercent(usedPct),
+        defaultValue: '{{period}} · {{percent}} used',
       }),
     );
-  }
+    if (reset) {
+      lines.push(t('chat.planUsage.tooltipReset', {
+        value: reset,
+        defaultValue: 'Resets: {{value}} (local time)',
+      }));
+    }
+  };
+  appendWindow(period, tp, fullReset);
   if (windows.length > 1) {
-    const others = windows
-      .map((w) => `${w.id} ${Math.round(w.usedPct)}%`)
-      .join(' · ');
-    lines.push(others);
+    for (const window of windows) {
+      if (window.id === display?.windowId) continue;
+      lines.push('');
+      appendWindow(window.id, window.usedPct, formatFullReset(window.resetAt, language));
+    }
     if (worstColor !== color && worstColor !== 'neutral' && worstColor !== 'green') {
       lines.push(
         t('chat.planUsage.worstHint', {
-          color: worstColor,
+          color: t(`chat.planUsage.paceColors.${worstColor}`, { defaultValue: worstColor }),
           defaultValue: 'Dot shows worst window ({{color}})',
         }),
       );

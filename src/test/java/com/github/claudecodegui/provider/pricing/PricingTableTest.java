@@ -42,6 +42,17 @@ public class PricingTableTest {
     }
 
     @Test
+    public void claudeResolvesSonnet55AboveTheBareSonnet5Prefix() {
+        // "claude-sonnet-5-5" is the newer point release and keeps the Sonnet 5 default rate
+        // ($3/$15), so it must outrank the shorter "claude-sonnet-5" prefix and survive
+        // dated snapshots instead of losing to it.
+        assertEquals(3.0, ClaudePricingTable.resolve("claude-sonnet-5-5").inputCostPer1M(), 1e-9);
+        assertEquals(15.0, ClaudePricingTable.resolve("claude-sonnet-5-5").outputCostPer1M(), 1e-9);
+        assertEquals(3.0, ClaudePricingTable.resolve("claude-sonnet-5-5-2026-04-01").inputCostPer1M(), 1e-9);
+        assertEquals(3.0, ClaudePricingTable.resolve("claude-sonnet-5").inputCostPer1M(), 1e-9);
+    }
+
+    @Test
     public void claudeAppliesAbove200KTierForSonnet4() {
         ClaudePricing pricing = ClaudePricingTable.resolve("claude-sonnet-4");
         assertNotNull(pricing);
@@ -79,5 +90,16 @@ public class PricingTableTest {
         assertEquals(0.5, CodexPricingTable.resolve("gpt-6-luna").outputCostPer1M(), 1e-9);
         assertEquals(0.01, CodexPricingTable.resolve("gpt-6-luna").cacheReadCostPer1M(), 1e-9);
         assertEquals(10.0, CodexPricingTable.resolve("gpt-6").inputCostPer1M(), 1e-9);
+    }
+
+    @Test
+    public void codexResolvesGpt61SolBeforeTheBareGpt6Prefix() {
+        // "gpt-6.1-sol" is the newer point release and keeps the GPT-6 Sol rate ($2/$10).
+        // Because its id starts with "gpt-6" it must be matched before that bare prefix
+        // (which aliases to the $10/$50 gpt-6-astra) and survive dated snapshots.
+        assertEquals(2.0, CodexPricingTable.resolve("gpt-6.1-sol").inputCostPer1M(), 1e-9);
+        assertEquals(10.0, CodexPricingTable.resolve("gpt-6.1-sol").outputCostPer1M(), 1e-9);
+        assertEquals(0.2, CodexPricingTable.resolve("gpt-6.1-sol").cacheReadCostPer1M(), 1e-9);
+        assertEquals(2.0, CodexPricingTable.resolve("gpt-6.1-sol-2026-04-01").inputCostPer1M(), 1e-9);
     }
 }

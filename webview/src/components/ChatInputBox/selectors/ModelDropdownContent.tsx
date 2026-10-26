@@ -18,6 +18,11 @@ interface ModelDropdownContentProps {
   showSearch: boolean;
   searchQuery: string;
   onSearchQueryChange: (query: string) => void;
+  /** Keyboard navigation for the search input (↑↓/Enter/Esc). */
+  onSearchKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onClearSearch?: () => void;
+  /** Row navigated to with the keyboard; rendered with the active outline. */
+  highlightedModelId: string | null;
   loading: boolean;
   error: string | null;
   onRetry?: () => void;
@@ -52,6 +57,9 @@ export const ModelDropdownContent = ({
   showSearch,
   searchQuery,
   onSearchQueryChange,
+  onSearchKeyDown,
+  onClearSearch,
+  highlightedModelId,
   loading,
   error,
   onRetry,
@@ -84,6 +92,8 @@ export const ModelDropdownContent = ({
         <ModelSearchRow
           searchQuery={searchQuery}
           onSearchQueryChange={onSearchQueryChange}
+          onSearchKeyDown={onSearchKeyDown}
+          onClearSearch={onClearSearch}
         />
       )}
       <div className={inline ? 'model-selector-list model-selector-list--inline' : 'model-selector-list'} style={DROPDOWN_LIST_STYLE}>
@@ -98,6 +108,7 @@ export const ModelDropdownContent = ({
             isSelectedModel={isSelectedModel}
             getModelLabel={getModelLabel}
             getModelDescription={getModelDescription}
+            highlightedModelId={highlightedModelId}
             onSelect={onSelect}
             onTogglePin={onTogglePin}
           />
@@ -106,6 +117,7 @@ export const ModelDropdownContent = ({
           loading={loading}
           visibleModelCount={visibleModelCount}
           hiddenModelCount={hiddenModelCount}
+          searchQuery={searchQuery}
         />
         <LongContextRow
           hideLongContextToggle={hideLongContextToggle}

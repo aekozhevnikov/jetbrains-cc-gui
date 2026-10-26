@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ModelInfo } from '../types';
 import { isRetiredClaudeModelId } from '../types';
@@ -19,6 +20,8 @@ interface ModelOptionRowProps {
   isPinned: boolean;
   label: string;
   description?: string;
+  /** Keyboard-navigated row (model search ↑↓); scrolls itself into view. */
+  isHighlighted?: boolean;
   onSelect: (modelId: string) => void;
   onTogglePin: (e: React.MouseEvent, modelId: string) => void;
 }
@@ -35,17 +38,26 @@ export const ModelOptionRow = ({
   isPinned,
   label,
   description,
+  isHighlighted = false,
   onSelect,
   onTogglePin,
 }: ModelOptionRowProps) => {
   const { t } = useTranslation();
+  const rowRef = useRef<HTMLDivElement>(null);
   // A custom model whose id the API no longer serves. Shown as a hint only:
   // the id is still sent verbatim because the user configured it on purpose.
   const isRetiredCustom = currentProvider === 'claude' && !!model.isCustom && isRetiredClaudeModelId(model.id);
 
+  useEffect(() => {
+    if (isHighlighted) {
+      rowRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isHighlighted]);
+
   return (
     <div
-      className={`selector-option ${isSelected ? 'selected' : ''}`}
+      ref={rowRef}
+      className={`selector-option ${isSelected ? 'selected' : ''} ${isHighlighted ? 'keyboard-highlighted' : ''}`}
       role="button"
       tabIndex={0}
       onClick={() => onSelect(model.id)}

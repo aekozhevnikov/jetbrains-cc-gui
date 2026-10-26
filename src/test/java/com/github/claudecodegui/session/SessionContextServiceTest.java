@@ -39,8 +39,55 @@ public class SessionContextServiceTest {
                 content.get(1).getAsJsonObject().get("text").getAsString());
     }
 
+    /** Module metadata belongs to native session instructions rather than every user turn. */
     @Test
-    public void buildCodexContextAppendReferencesPathsWithoutInliningContent() throws Exception {
+    public void codexUserContextDoesNotRepeatProjectModules() {
+        JsonObject openedFiles = new JsonObject();
+        JsonArray modules = new JsonArray();
+        for (String name : List.of("project", "project.main", "project.test")) {
+            JsonObject module = new JsonObject();
+            module.addProperty("name", name);
+            modules.add(module);
+        }
+        openedFiles.add("modules", modules);
+        openedFiles.addProperty("active", "src/Active.java");
+        SessionContextService service = new SessionContextService(null);
+        String firstTurn = contextValue(service.buildCodexAdditionalContext(openedFiles, List.of("src/Other.java")));
+        String nextTurn = contextValue(service.buildCodexAdditionalContext(openedFiles, List.of("src/Next.java")));
+        assertFalse(firstTurn.contains("Project Modules"));
+        assertFalse(nextTurn.contains("project.main"));
+        assertTrue(firstTurn.contains("src/Active.java"));
+        assertTrue(firstTurn.contains("src/Other.java"));
+        assertTrue(nextTurn.contains("src/Next.java"));
+    }
+
+    /** Role and project context survive native initialization without contaminating subsequent user input. */
+    @Test
+    public void nativeSessionInstructionsKeepModulesAndTheSelectedRole() {
+        JsonObject openedFiles = com.google.gson.JsonParser.parseString("""
+                {"modules":[{"name":"project"},{"name":"project.main"},{}]}
+                """).getAsJsonObject();
+        SessionContextService service = new SessionContextService(null);
+        String instructions = service.buildCodexSessionInstructions("Review carefully.", openedFiles);
+        assertTrue(instructions.startsWith("Review carefully.\n\n## Project Modules"));
+        assertTrue(instructions.contains("`project.main`"));
+        assertTrue(instructions.contains("`unknown`"));
+        assertEquals(instructions, service.buildCodexSessionInstructions("Review carefully.", openedFiles));
+        assertTrue(service.buildLegacyContextAppend(openedFiles, null).contains("## Project Modules"));
+        assertEquals("## Project Modules", service.buildCodexSessionInstructions(null, openedFiles).lines().findFirst().orElseThrow());
+        assertTrue(service.buildCodexSessionInstructions(" ", openedFiles).startsWith("## Project Modules"));
+        for (JsonObject context : java.util.Arrays.asList(null, new JsonObject(),
+                com.google.gson.JsonParser.parseString("{\"modules\":[]}").getAsJsonObject(),
+                com.google.gson.JsonParser.parseString("{\"modules\":[{\"name\":\"one\"}]}").getAsJsonObject(),
+                com.google.gson.JsonParser.parseString("{\"modules\":\"unknown\"}").getAsJsonObject(),
+                com.google.gson.JsonParser.parseString("{\"isWorkspace\":true,\"modules\":[{},{}]}").getAsJsonObject())) {
+            assertEquals("Role", service.buildCodexSessionInstructions("Role", context));
+        }
+    }
+
+    /** Keeps referenced files and selection positions out of the user text. */
+    @Test
+    public void codexContextReferencesPathsWithoutInliningContent() throws Exception {
         File referencedFile = temporaryFolder.newFile("ReferencedExample.java");
         Files.writeString(referencedFile.toPath(), "class ReferencedExample {}", StandardCharsets.UTF_8);
 
@@ -58,10 +105,13 @@ public class SessionContextServiceTest {
 
         SessionContextService service = new SessionContextService(null);
 
-        String context = service.buildCodexContextAppend(
+        JsonObject fragments = service.buildCodexAdditionalContext(
                 openedFilesJson,
                 List.of(referencedFile.getAbsolutePath(), "terminal://backend-shell")
         );
+        String context = contextValue(fragments);
+        assertEquals("application", fragments.getAsJsonObject("ide_context").get("kind").getAsString());
+        assertFalse(context.contains("primary subject"));
 
         assertTrue(context.contains("## Active Terminal Session"));
         assertTrue(context.contains("`backend-shell`"));
@@ -77,8 +127,9 @@ public class SessionContextServiceTest {
         assertFalse(context.contains("logger.info(\"hello\");"));
     }
 
+    /** Treats the active file as editor state rather than assuming the user's intent. */
     @Test
-    public void buildCodexContextAppendReferencesActiveFileWithoutContent() throws Exception {
+    public void codexContextReferencesActiveFileWithoutContent() throws Exception {
         File activeFile = temporaryFolder.newFile("ActiveExample.java");
         Files.writeString(activeFile.toPath(), "class ActiveExample {}", StandardCharsets.UTF_8);
 
@@ -87,10 +138,55 @@ public class SessionContextServiceTest {
 
         SessionContextService service = new SessionContextService(null);
 
-        String context = service.buildCodexContextAppend(openedFilesJson, null);
+        JsonArray others = new JsonArray();
+        others.add("src/Another.java");
+        openedFilesJson.add("others", others);
+        String context = contextValue(service.buildCodexAdditionalContext(openedFilesJson, null));
 
         assertTrue(context.contains("## User's Current IDE Context"));
         assertTrue(context.contains(activeFile.getAbsolutePath()));
+        assertTrue(context.contains("src/Another.java"));
+        assertFalse(context.contains("PRIMARY SUBJECT"));
         assertFalse(context.contains("class ActiveExample {}"));
+    }
+
+    /** Avoids inventing an editor context when automatic collection is disabled. */
+    @Test
+    public void emptyEditorStateProducesNoFragments() {
+        assertTrue(new SessionContextService(null).buildCodexAdditionalContext(new JsonObject(), null).isEmpty());
+    }
+
+    /** Keeps long tab lists and file references from consuming the active selection's native budget. */
+    @Test
+    public void editorAndExplicitReferencesReceiveIndependentContextBudgets() {
+        JsonObject openedFiles = new JsonObject();
+        openedFiles.addProperty("active", "src/Active.java");
+        JsonArray tabs = new JsonArray();
+        List<String> references = new java.util.ArrayList<>();
+        for (int index = 0; index < 40; index++) {
+            String path = "src/" + "long_directory_name/".repeat(12) + "File" + index + ".java";
+            tabs.add(path);
+            references.add(path);
+        }
+        openedFiles.add("others", tabs);
+        SessionContextService service = new SessionContextService(null);
+        JsonObject fragments = service.buildCodexAdditionalContext(openedFiles, references);
+        String active = fragments.getAsJsonObject("ide_context").get("value").getAsString();
+        assertTrue(active.contains("src/Active.java"));
+        assertFalse(active.contains("long_directory_name"));
+        for (int index = 0; index < references.size(); index++) {
+            String reference = fragments.getAsJsonObject("referenced_files_" + index).get("value").getAsString();
+            assertTrue(reference.contains(references.get(index)));
+            assertFalse(reference.contains("src/Active.java"));
+            assertTrue(reference.length() < 500);
+        }
+        String openTabs = fragments.getAsJsonObject("open_tabs").get("value").getAsString();
+        assertTrue(openTabs.contains("File19.java"));
+        assertFalse(openTabs.contains("File20.java"));
+    }
+
+    private static String contextValue(JsonObject fragments) {
+        return String.join("\n\n", fragments.entrySet().stream()
+                .map(entry -> entry.getValue().getAsJsonObject().get("value").getAsString()).toList());
     }
 }

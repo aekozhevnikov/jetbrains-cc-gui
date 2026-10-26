@@ -76,7 +76,8 @@ export interface SettingsWindowCallbacksDeps {
   setCodeFontConfig: (config: CodeFontConfig | undefined) => void;
   setIdeTheme: (theme: 'light' | 'dark' | null) => void;
   setLocalStreamingEnabled: (enabled: boolean) => void;
-  setCodexSandboxMode?: (mode: 'workspace-write' | 'danger-full-access') => void;
+  setCodexSandboxMode?: (mode: 'read-only' | 'workspace-write' | 'danger-full-access') => void;
+  setCodexSandboxSource?: (source: string) => void;
   setLocalSendShortcut: (shortcut: 'enter' | 'cmdEnter') => void;
   setLoading: (loading: boolean) => void;
   setCodexLoading: (loading: boolean) => void;
@@ -214,6 +215,7 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
         const data = JSON.parse(jsonStr);
         d().setWorkingDirectory(data.customWorkingDir || '');
         d().setSavingWorkingDirectory(false);
+        window.dispatchEvent(new Event('codex-working-directory-changed'));
       } catch (error) {
         console.error('[SettingsView] Failed to parse working directory:', error);
         d().setSavingWorkingDirectory(false);
@@ -287,13 +289,18 @@ export function useSettingsWindowCallbacks(deps: SettingsWindowCallbacksDeps) {
       };
     }
 
-    // Codex sandbox mode callback
+    // Codex sandbox callback: the legacy project record only. Desired/effective
+    // are never reported by the host — the live scope comes from the chat state
+    // and the app-server's own thread/settings/updated echo.
     window.updateCodexSandboxMode = (jsonStr: string) => {
       try {
         const data = JSON.parse(jsonStr);
         const mode = data?.sandboxMode;
-        if (mode === 'workspace-write' || mode === 'danger-full-access') {
+        if (mode === 'read-only' || mode === 'workspace-write' || mode === 'danger-full-access') {
           d().setCodexSandboxMode?.(mode);
+        }
+        if (typeof data?.sandboxSource === 'string') {
+          d().setCodexSandboxSource?.(data.sandboxSource);
         }
       } catch (error) {
         console.error('[SettingsView] Failed to parse Codex sandbox mode config:', error);

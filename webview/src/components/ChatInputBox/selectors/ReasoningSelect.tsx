@@ -61,6 +61,8 @@ export const ReasoningSelect = ({
     minWidth: embedded ? 180 : 200,
     maxWidth: 280,
     submenuMaxHeight: SUBMENU_MAX_HEIGHT_PX,
+    // No footer sits below this fly-out; the default clearance would lift it off its own row.
+    submenuBottomClearance: 0,
   });
 
   const { isVisible, availableLevels, currentLevel } = useReasoningEffortGuard(
@@ -129,10 +131,20 @@ export const ReasoningSelect = ({
   }, [embedded, isOpen]);
 
   useLayoutEffect(() => {
-    if (embedded || isOpen) {
-      recalculate();
-    }
-  }, [embedded, isOpen, recalculate]);
+    if (!embedded && !isOpen) return;
+    recalculate();
+    window.addEventListener('resize', recalculate);
+    // Wrapping and parent-menu resizing can change the measured bounds after opening.
+    const observer = new ResizeObserver(recalculate);
+    if (dropdownRef.current) observer.observe(dropdownRef.current);
+    const anchor = embedded ? triggerRef?.current : buttonRef.current;
+    if (anchor) observer.observe(anchor);
+    if (embedded && anchor?.parentElement) observer.observe(anchor.parentElement);
+    return () => {
+      window.removeEventListener('resize', recalculate);
+      observer.disconnect();
+    };
+  }, [embedded, isOpen, recalculate, triggerRef]);
 
   if (!isVisible) return null;
   if (!currentLevel) return null;
@@ -141,6 +153,7 @@ export const ReasoningSelect = ({
     ? {
         minWidth: 0,
         maxWidth: maxWidth ?? 280,
+        boxSizing: 'border-box',
         ...(maxHeight != null
           ? { maxHeight: `${maxHeight}px`, overflowY: 'auto' as const }
           : { overflowY: 'visible' as const }),

@@ -83,7 +83,8 @@ export const ModelConfigSelect = ({
     buttonRef,
     dropdownRef,
     preferredAlignment: 'right',
-    minWidth: 220,
+    // Mirrors .model-config-dropdown's CSS floor so the measured and rendered widths agree.
+    minWidth: 280,
   });
 
   const handleReasoningChange = useCallback((effort: ReasoningEffort) => {
@@ -182,6 +183,8 @@ export const ModelConfigSelect = ({
   useLayoutEffect(() => {
     if (isOpen) {
       mainRecalculate();
+      window.addEventListener('resize', mainRecalculate);
+      return () => window.removeEventListener('resize', mainRecalculate);
     }
   }, [isOpen, mainRecalculate, showEffortRow, showSpeed, showPreset, showContextRow]);
 

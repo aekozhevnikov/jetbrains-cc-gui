@@ -40,6 +40,7 @@ public final class ClaudePricingTable {
             Map.entry("claude-sonnet-4-5", TIERED_SONNET_PRICING),
             Map.entry("claude-sonnet-4-6", DEFAULT_PRICING),
             Map.entry("claude-sonnet-4-7", DEFAULT_PRICING),
+            Map.entry("claude-sonnet-5-5", DEFAULT_PRICING),
             Map.entry("claude-sonnet-5", DEFAULT_PRICING),
             Map.entry("claude-haiku-4", HAIKU_4_5_PRICING),
             Map.entry("claude-haiku-4-5", HAIKU_4_5_PRICING)
@@ -57,6 +58,7 @@ public final class ClaudePricingTable {
             "claude-opus-4-1",
             "claude-opus-4",
             "claude-sonnet-4-20250514",
+            "claude-sonnet-5-5",
             "claude-sonnet-5",
             "claude-sonnet-4-7",
             "claude-sonnet-4-6",

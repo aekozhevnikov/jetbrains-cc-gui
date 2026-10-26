@@ -59,6 +59,7 @@ public class SettingsHandler extends BaseMessageHandler {
         "get_editor_font_config",
         "get_ui_font_config",
         "set_ui_font_config",
+        "set_font_size_level",
         "browse_ui_font_file",
         "get_code_font_config",
         "set_code_font_config",
@@ -230,6 +231,9 @@ public class SettingsHandler extends BaseMessageHandler {
                 return true;
             case "set_ui_font_config":
                 projectConfigHandler.handleSetUiFontConfig(content);
+                return true;
+            case "set_font_size_level":
+                this.projectConfigHandler.handleSetFontSizeLevel(content);
                 return true;
             case "browse_ui_font_file":
                 projectConfigHandler.handleBrowseUiFontFile();

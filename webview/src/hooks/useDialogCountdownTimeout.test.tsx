@@ -3,6 +3,22 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useDialogCountdownTimeout } from './useDialogCountdownTimeout.js';
 
 describe('useDialogCountdownTimeout', () => {
+  it('retries a refused submission within the original deadline', () => {
+    vi.useFakeTimers();
+    const onTimeout = vi.fn();
+    const { result } = renderHook(() => useDialogCountdownTimeout({ isOpen: true,
+      requestKey: 'retry', timeoutSeconds: 3, onTimeout }));
+    act(() => vi.advanceTimersByTime(1_000));
+    expect(result.current.markSubmitted()).toBe(true);
+    result.current.restoreSubmission();
+    expect(result.current.markSubmitted()).toBe(true);
+    result.current.restoreSubmission();
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(result.current.remainingSeconds).toBe(0);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    result.current.restoreSubmission();
+    expect(result.current.markSubmitted()).toBe(false);
+  });
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
@@ -33,6 +49,39 @@ describe('useDialogCountdownTimeout', () => {
     });
 
     expect(onTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-arms when the timeout decision cannot be sent, so the next interaction retries it', () => {
+    vi.useFakeTimers();
+    // First send is refused (bridge write fails), the retry succeeds.
+    const onTimeout = vi.fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValue(undefined);
+
+    const { result } = renderHook(() => useDialogCountdownTimeout({
+      isOpen: true,
+      requestKey: 'request-1',
+      timeoutSeconds: 3,
+      onTimeout,
+    }));
+
+    act(() => {
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+
+    // The dialog stayed open after the refused send: a click must retry the
+    // timeout decision instead of deadlocking on the latched submitted flag.
+    act(() => {
+      expect(result.current.markSubmitted()).toBe(false);
+    });
+    expect(onTimeout).toHaveBeenCalledTimes(2);
+
+    // A successful send latches again: no further retries fire.
+    act(() => {
+      expect(result.current.markSubmitted()).toBe(false);
+    });
+    expect(onTimeout).toHaveBeenCalledTimes(2);
   });
 
   it('manual submission suppresses the timeout callback', () => {

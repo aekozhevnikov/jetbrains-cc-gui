@@ -18,7 +18,7 @@ export interface PlanUsageIndicatorProps {
 }
 
 /**
- * Layout D: mini progress bar + % + window switcher + short reset.
+ * Compact summary with full reset dates and known windows in a tooltip.
  * Click the window chip (5h / 7d) to cycle between windows.
  */
 export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
@@ -46,7 +46,7 @@ export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
     writeStoredWindowId(next);
   }, [canSwitch, windows, display?.windowId, windowId]);
 
-  const { present, tp, color, worstColor, shortReset, fullReset, winLabel } =
+  const { present, tp, color, worstColor, fullReset, winLabel } =
     derivePlanUsageView(snapshot, display, i18n.language);
 
   const tooltip = useMemo(() => buildPlanUsageTooltip({
@@ -58,8 +58,9 @@ export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
     windows,
     worstColor,
     color,
+    language: i18n.language,
     t,
-  }), [present, snapshot, tp, fullReset, display, windows, worstColor, color, t]);
+  }), [present, snapshot, tp, fullReset, display, windows, worstColor, color, i18n.language, t]);
 
   if (status === 'idle') return null;
 
@@ -79,7 +80,6 @@ export const PlanUsageIndicator: React.FC<PlanUsageIndicatorProps> = memo(({
       canSwitch={canSwitch}
       winLabel={winLabel}
       onCycleWindow={onCycleWindow}
-      shortReset={shortReset}
       worstColor={worstColor}
       t={t}
     />
