@@ -1303,6 +1303,7 @@
       "scopeGlobal": "全局",
       "scopeLocal": "本地",
       "scopeStore": "插件存储",
+      "claudeCodeSubagents": "Claude Code 子代理",
       "readOnly": "只读",
       "readOnlyHint": "从 Claude Code 智能体文件发现。插件从不写入该文件——如需修改请先复制。",
       "disabled": "已阻止",

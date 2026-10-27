@@ -1298,6 +1298,7 @@
       "scopeGlobal": "Global",
       "scopeLocal": "Local",
       "scopeStore": "Plugin store",
+      "claudeCodeSubagents": "Claude Code Subagents",
       "readOnly": "Read-only",
       "readOnlyHint": "Discovered from a Claude Code agent file. The plugin never writes to it — copy it to make changes.",
       "disabled": "Blocked",

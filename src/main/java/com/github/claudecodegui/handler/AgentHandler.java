@@ -41,6 +41,7 @@ public class AgentHandler extends BaseMessageHandler {
 
     private static final String[] SUPPORTED_TYPES = {
         "get_agents",
+        "get_subagents",
         "add_agent",
         "update_agent",
         "delete_agent",
@@ -96,7 +97,14 @@ public class AgentHandler extends BaseMessageHandler {
                 // The body is forwarded verbatim: it names the scopes the client
                 // asked for, and dropping it here would silently answer every
                 // request with all three.
+                // LEGACY: get_agents now returns ONLY store agents for chat-bar compatibility.
+                // Settings tab should use get_subagents for discovered agents.
                 handleGetAgents(content);
+                return true;
+            case "get_subagents":
+                // New message for discovered Claude Code subagents (Settings tab only).
+                // Returns file-backed agents from ~/.claude/agents and .claude/agents.
+                handleGetSubagents(content);
                 return true;
             case "add_agent":
                 handleAddAgent(content);
@@ -159,6 +167,11 @@ public class AgentHandler extends BaseMessageHandler {
     /**
      * Resolve the list off the EDT and hand it to the webview.
      *
+     * <p>LEGACY BEHAVIOR: Returns ONLY store agents (prompt prefixes for the chat bar).
+     * Discovered subagents are NOT included - the Settings tab uses get_subagents for those.
+     * This maintains backward compatibility with the chat-bar # picker which only knows
+     * how to use store agents (they have prompts).
+     *
      * <p>Split from {@link #handleGetAgents} so the thread hop is visible at the
      * call site rather than buried inside the method the other callers invoke
      * from {@code invokeLater}.
@@ -168,26 +181,23 @@ public class AgentHandler extends BaseMessageHandler {
             List<String> scopes = AgentResolver.parseRequestedScopes(content);
             List<JsonObject> storeAgents = settingsService.getAgents();
 
-            // The project root is the effective working directory, not the raw
-            // base path: a configured custom directory is the one Claude runs
-            // in, so it is the one whose .claude/agents is in effect.
-            String workspaceRoot = context.resolveEffectiveWorkingDirectory();
-            SubagentDiscoveryScanner.ScanResult scan = SubagentDiscoveryScanner.scanAll(workspaceRoot);
+            // LEGACY: Only return store agents. The chat-bar provider sends empty body
+            // which means "all scopes", but we filter to store only for compatibility.
+            // If a client explicitly requests only store scope, honor that.
+            // If they request global/local, return empty (those are for get_subagents).
+            List<String> filteredScopes;
+            if (scopes.isEmpty()) {
+                // Empty body = legacy client, return store only
+                filteredScopes = List.of(AgentFields.SCOPE_STORE);
+            } else {
+                // Explicit scopes requested - filter to store only
+                filteredScopes = scopes.stream()
+                        .filter(AgentFields.SCOPE_STORE::equals)
+                        .toList();
+            }
 
             AgentResolver.Resolution resolution = AgentResolver.resolve(
-                    storeAgents, scan, AgentDenyRules.readForCurrentHome(), scopes);
-            if (!resolution.unmatchedDenyRules().isEmpty()) {
-                // Inert rules are worth a line: the user wrote a rule and the
-                // plugin is telling them it matches nothing they can see.
-                // The names come from permissions.deny in a settings file, so
-                // they are user-supplied rather than repository-supplied — a
-                // weaker vector than a cloned file, but the escaping is already
-                // in this method for the rejection path, and leaving one log
-                // line out of it would be the inconsistency a reader trips on.
-                resolution.unmatchedDenyRules().forEach(rule ->
-                        LOG.info("[AgentHandler] permissions.deny names no known agent: "
-                                + LogSanitizer.sanitize(rule)));
-            }
+                    storeAgents, null, AgentDenyRules.readForProject(context.resolveEffectiveWorkingDirectory()), filteredScopes);
 
             String agentsJson = gson.toJson(resolution.agents());
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -215,6 +225,75 @@ public class AgentHandler extends BaseMessageHandler {
             LOG.error("[AgentHandler] Failed to get agents: " + e.getMessage(), e);
             ApplicationManager.getApplication().invokeLater(() -> {
                 callJavaScript("window.updateAgents", escapeJs("[]"));
+            });
+        }
+    }
+
+    /**
+     * Handle get_subagents - returns discovered Claude Code subagents for the Settings tab.
+     *
+     * <p>Unlike {@link #handleGetAgents}, this returns ONLY file-backed agents from
+     * ~/.claude/agents (global) and .claude/agents (local). Store agents are NOT
+     * included, because they are a different concept (prompt prefixes for the chat bar)
+     * and the chat bar only knows how to use store agents.
+     *
+     * <p>This keeps the two concepts separate: store agents (editable, with prompts)
+     * for the chat-bar # picker, and discovered subagents (read-only, delegation targets)
+     * for the Settings tab. This fixes the issue where selecting a discovered agent
+     * in the chat bar did nothing because it had no prompt.
+     */
+    private void handleGetSubagents(String content) {
+        AppExecutorUtil.getAppExecutorService().execute(() -> resolveAndSendSubagents(content));
+    }
+
+    /**
+     * Resolve discovered subagents off the EDT and hand them to the webview.
+     *
+     * <p>Returns agents with scope "global" and "local" only. No store agents.
+     * Precedence: local > global (project overrides user). Broken files are
+     * included as non-loadable entries so the UI can show why they didn't load.
+     */
+    private void resolveAndSendSubagents(String content) {
+        try {
+            // Parse requested scopes (global, local only - no store)
+            List<String> scopes = AgentResolver.parseRequestedScopes(content);
+            // Filter out store scope if present - this endpoint is for discovered agents only
+            List<String> filteredScopes = scopes.stream()
+                    .filter(s -> !AgentFields.SCOPE_STORE.equals(s))
+                    .toList();
+
+            // The project root is the effective working directory
+            String workspaceRoot = context.resolveEffectiveWorkingDirectory();
+            SubagentDiscoveryScanner.ScanResult scan = SubagentDiscoveryScanner.scanAll(workspaceRoot);
+
+            // Resolve with empty store agents - we only want discovered agents
+            AgentResolver.Resolution resolution = AgentResolver.resolve(
+                    List.of(), scan, AgentDenyRules.readForProject(workspaceRoot), filteredScopes);
+
+            if (!resolution.unmatchedDenyRules().isEmpty()) {
+                resolution.unmatchedDenyRules().forEach(rule ->
+                        LOG.info("[AgentHandler] permissions.deny names no known subagent: "
+                                + LogSanitizer.sanitize(rule)));
+            }
+
+            String agentsJson = gson.toJson(resolution.agents());
+            ApplicationManager.getApplication().invokeLater(() -> {
+                callJavaScript("window.updateSubagents", escapeJs(agentsJson));
+            });
+        } catch (IllegalArgumentException e) {
+            LOG.warn("[AgentHandler] Rejected get_subagents request: "
+                    + LogSanitizer.sanitize(e.getMessage()));
+            ApplicationManager.getApplication().invokeLater(() -> {
+                JsonObject error = new JsonObject();
+                error.addProperty("success", false);
+                error.addProperty("error", e.getMessage());
+                callJavaScript("window.updateSubagents", escapeJs("[]"));
+                callJavaScript("window.agentOperationResult", escapeJs(gson.toJson(error)));
+            });
+        } catch (Exception e) {
+            LOG.error("[AgentHandler] Failed to get subagents: " + e.getMessage(), e);
+            ApplicationManager.getApplication().invokeLater(() -> {
+                callJavaScript("window.updateSubagents", escapeJs("[]"));
             });
         }
     }

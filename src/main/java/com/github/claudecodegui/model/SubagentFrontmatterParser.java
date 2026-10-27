@@ -786,15 +786,25 @@ public final class SubagentFrontmatterParser {
         Object nameValue = yamlMap.get("name");
         String declared = nameValue == null ? null : String.valueOf(nameValue).trim();
 
+        // Check for missing name - per spec, file is treated as documentation, not an agent
         if (declared == null || declared.isEmpty()) {
-            // 39 of the 152 real files with frontmatter have no name key. Dropping
-            // them would be the silent loss PRD R4 forbids, so the file stem stands
-            // in and says so. The same applies to a name that parses to a non-scalar.
             String reason = declared == null
                     ? "frontmatter has no name field"
                     : "frontmatter has an empty name field";
-            warnings.add(reason + "; using the file name \"" + stem + "\" instead");
-            return new Result(Status.PARSED, stem, fields, join(warnings), path);
+            warnings.add(reason + "; file is not a loadable agent (treated as documentation per spec)");
+            return new Result(Status.UNPARSEABLE, stem, fields, join(warnings), path);
+        }
+
+        // Check name length - spec says > 256 chars is skipped
+        if (declared.length() > 256) {
+            warnings.add("name \"" + declared + "\" exceeds 256 characters; file is not a loadable agent per spec");
+            return new Result(Status.UNPARSEABLE, declared, fields, join(warnings), path);
+        }
+
+        // Check name starting with '-' - spec says this is skipped
+        if (declared.startsWith("-")) {
+            warnings.add("name \"" + declared + "\" starts with '-'; file is not a loadable agent per spec");
+            return new Result(Status.UNPARSEABLE, declared, fields, join(warnings), path);
         }
 
         if (!AgentFields.isValidName(declared)) {
@@ -804,6 +814,14 @@ public final class SubagentFrontmatterParser {
             // rather than vanished.
             warnings.add("name \"" + declared + "\" is not a valid agent name"
                     + " (a colon is reserved for plugin-scoped identifiers); the file was not loaded");
+            return new Result(Status.UNPARSEABLE, declared, fields, join(warnings), path);
+        }
+
+        // Check for description - per spec, name but no description means skipped
+        Object descValue = yamlMap.get("description");
+        String declaredDesc = descValue == null ? null : String.valueOf(descValue).trim();
+        if (declaredDesc == null || declaredDesc.isEmpty()) {
+            warnings.add("frontmatter has no description field; file is not a loadable agent per spec");
             return new Result(Status.UNPARSEABLE, declared, fields, join(warnings), path);
         }
 

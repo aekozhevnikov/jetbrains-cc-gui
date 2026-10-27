@@ -823,6 +823,7 @@
       "scopeGlobal": "Global",
       "scopeLocal": "Local",
       "scopeStore": "Magasin du plugin",
+      "claudeCodeSubagents": "Sous-agents Claude Code",
       "readOnly": "Lecture seule",
       "readOnlyHint": "Découvert dans un fichier d’agent Claude Code. Le plugin n’y écrit jamais : copiez-le pour le modifier.",
       "disabled": "Bloqué",

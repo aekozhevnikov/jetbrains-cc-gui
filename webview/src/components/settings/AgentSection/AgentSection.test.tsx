@@ -21,6 +21,7 @@ const styles = readFileSync('src/components/settings/AgentSection/style.module.l
 const translations: Record<string, string> = {
   'settings.agent.title': 'Prompts',
   'settings.agent.customAgents': 'Custom Prompts',
+  'settings.agent.claudeCodeSubagents': 'Claude Code Subagents',
   'settings.agent.noAgents': 'No custom prompts',
   'settings.agent.loading': 'Loading...',
   'settings.agent.menu': 'Menu',
@@ -123,8 +124,10 @@ const storeAgent: AgentConfig = {
 
 function renderSection(overrides: Partial<React.ComponentProps<typeof AgentSection>> = {}) {
   const props: React.ComponentProps<typeof AgentSection> = {
-    agents: [],
-    loading: false,
+    storeAgents: [],
+    subagents: [],
+    agentsLoading: false,
+    subagentsLoading: false,
     onAdd: vi.fn(),
     onEdit: vi.fn(),
     onDelete: vi.fn(),
@@ -140,8 +143,10 @@ function renderSection(overrides: Partial<React.ComponentProps<typeof AgentSecti
 /** Props for a direct render, for the cases that need to re-render mid-test. */
 function baseProps(): React.ComponentProps<typeof AgentSection> {
   return {
-    agents: [],
-    loading: false,
+    storeAgents: [],
+    subagents: [],
+    agentsLoading: false,
+    subagentsLoading: false,
     onAdd: vi.fn(),
     onEdit: vi.fn(),
     onDelete: vi.fn(),
@@ -167,18 +172,19 @@ describe('AgentSection', () => {
 
     it('shows a badge naming each of the three scopes', () => {
       renderSection({
-        agents: [
+        storeAgents: [storeAgent],
+        subagents: [
           globalAgent,
           { ...globalAgent, id: 'local-1', name: 'local-one', scope: 'local', path: '/w/.claude/agents/local-one.md' },
-          storeAgent,
         ],
       });
 
-      expect(badges().map((b) => b.textContent)).toEqual(['Global', 'Local', 'Plugin store']);
+      // Store agents render first (Custom Agents section), then subagents (Claude Code Subagents section)
+      expect(badges().map((b) => b.textContent)).toEqual(['Plugin store', 'Global', 'Local']);
     });
 
     it('omits the badge for a legacy entry that has no scope', () => {
-      renderSection({ agents: [{ id: 'legacy', name: 'legacy', prompt: 'x' }] });
+      renderSection({ storeAgents: [{ id: 'legacy', name: 'legacy', prompt: 'x' }] });
 
       // The tally still names all three scopes; what is absent is the badge on
       // the card, because a scopeless record predates discovery and has no
@@ -189,7 +195,7 @@ describe('AgentSection', () => {
 
   describe('row content', () => {
     it('shows name, description and model', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       expect(screen.getByText('code-reviewer')).toBeTruthy();
       expect(screen.getByText('Reviews code before merge')).toBeTruthy();
@@ -198,7 +204,7 @@ describe('AgentSection', () => {
 
     it('summarizes the tools and permission configuration', () => {
       renderSection({
-        agents: [
+        subagents: [
           {
             ...globalAgent,
             tools: ['Read', 'Grep'],
@@ -215,7 +221,7 @@ describe('AgentSection', () => {
     });
 
     it('reports an empty tool list rather than staying silent', () => {
-      renderSection({ agents: [{ ...globalAgent, tools: [] }] });
+      renderSection({ subagents: [{ ...globalAgent, tools: [] }] });
 
       expect(screen.getByText('no tools')).toBeTruthy();
     });
@@ -223,7 +229,7 @@ describe('AgentSection', () => {
 
   describe('details view', () => {
     it('is collapsed until asked for', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       expect(screen.getByText('Details')).toBeTruthy();
       expect(screen.queryByText('Max turns')).toBeNull();
@@ -231,7 +237,7 @@ describe('AgentSection', () => {
 
     it('renders every specification field, set or not', () => {
       const { container } = renderSection({
-        agents: [{ ...globalAgent, maxTurns: 12, tools: ['Read'], hooks: { PreToolUse: ['Bash'] } }],
+        subagents: [{ ...globalAgent, maxTurns: 12, tools: ['Read'], hooks: { PreToolUse: ['Bash'] } }],
       });
 
       fireEvent.click(screen.getByText('Details'));
@@ -246,7 +252,7 @@ describe('AgentSection', () => {
     });
 
     it('shows the file path of a discovered agent', () => {
-      const { container } = renderSection({ agents: [globalAgent] });
+      const { container } = renderSection({ subagents: [globalAgent] });
 
       fireEvent.click(screen.getByText('Details'));
 
@@ -254,7 +260,7 @@ describe('AgentSection', () => {
     });
 
     it('collapses again on a second click', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       fireEvent.click(screen.getByText('Details'));
       expect(screen.getByText('Hide details')).toBeTruthy();
@@ -267,7 +273,7 @@ describe('AgentSection', () => {
   describe('warnings', () => {
     it('renders a parser warning for a malformed entry', () => {
       const { container } = renderSection({
-        agents: [
+        subagents: [
           {
             id: 'global-broken',
             name: 'broken',
@@ -286,7 +292,7 @@ describe('AgentSection', () => {
   describe('deny state', () => {
     it('marks a denied agent and explains why', () => {
       const { container } = renderSection({
-        agents: [
+        subagents: [
           {
             ...globalAgent,
             disabled: true,
@@ -300,7 +306,7 @@ describe('AgentSection', () => {
     });
 
     it('does not mark an allowed agent', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       expect(screen.queryByText('Blocked')).toBeNull();
     });
@@ -308,45 +314,52 @@ describe('AgentSection', () => {
 
   describe('search', () => {
     /** The three scopes' worth of names a search has to be able to reach. */
-    const inventory: AgentConfig[] = [
+    const storeInventory: AgentConfig[] = [
+      { ...storeAgent, id: 'store-1', name: 'my-prompt', prompt: 'Be extremely concise' },
+    ];
+    const subagentsInventory: AgentConfig[] = [
       globalAgent,                                   // code-reviewer
       { ...globalAgent, id: 'local-1', name: 'local-helper', scope: 'local', path: '/w/.claude/agents/local-helper.md' },
-      { ...storeAgent, id: 'store-1', name: 'my-prompt', prompt: 'Be extremely concise' },
     ];
 
     const type = (value: string) => {
-      fireEvent.change(screen.getByPlaceholderText('Search prompts'), {
-        target: { value },
-      });
+      // Target the subagent search box (second one) since we're testing subagent filtering
+      const searchInputs = screen.getAllByPlaceholderText('Search prompts');
+      fireEvent.change(searchInputs[1], { target: { value } });
     };
 
     const shownNames = () =>
       screen.queryAllByTestId('agent-scope-badge').length;
 
-    it('narrows the list by name', () => {
-      renderSection({ agents: inventory });
+    it('narrows the subagent list by name (store agents are in separate section)', () => {
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('local-helper');
 
+      // Subagent search filters only subagents
       expect(screen.getByText('local-helper')).toBeTruthy();
+      // code-reviewer is a subagent but doesn't match "local-helper"
       expect(screen.queryByText('code-reviewer')).toBeNull();
-      expect(screen.queryByText('my-prompt')).toBeNull();
+      // my-prompt is a store agent in a different section - NOT filtered by subagent search
+      expect(screen.getByText('my-prompt')).toBeTruthy();
     });
 
     it('matches on description and on prompt text, not just the name', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
-      // "before merge" is the description of the first one; "concise" appears
-      // only inside a store prompt, which has no description at all.
+      // "before merge" is the description of the first subagent
       type('before merge');
       expect(screen.getByText('code-reviewer')).toBeTruthy();
 
+      // "extremely concise" is in store agent prompt - NOT filtered by subagent search
+      // But it would be found by the store agent search (separate search box)
       type('extremely concise');
+      // Store agent is not affected by subagent search
       expect(screen.getByText('my-prompt')).toBeTruthy();
     });
 
     it('matches on the file name, so an agent can be found by where it lives', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('local-helper.md');
 
@@ -354,7 +367,7 @@ describe('AgentSection', () => {
     });
 
     it('ignores case', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('CODE-REVIEWER');
 
@@ -364,10 +377,11 @@ describe('AgentSection', () => {
 
     /** A stray space must not silently empty a list of a hundred agents. */
     it('treats a whitespace-only query as no query', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('   ');
 
+      // Both store agents (1) and subagents (2) should be visible
       expect(shownNames()).toBe(3);
       expect(screen.queryByTestId('agent-no-matches')).toBeNull();
     });
@@ -378,19 +392,24 @@ describe('AgentSection', () => {
      * answering the question its label asks.
      */
     it('reports how many matched without changing the tally', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('local-helper');
 
-      expect(screen.getByTestId('agent-match-count').textContent).toBe('1 of 3');
-      expect(screen.getByTestId('count-global').textContent).toContain('Global1');
-      expect(screen.getByTestId('agent-scope-counts').textContent).toContain('Total3');
+      // Match count for subagent section has data-testid="subagent-match-count"
+      expect(screen.getByTestId('subagent-match-count').textContent).toBe('1 of 2');
+      // Scope counts for subagents section (second set of counts)
+      const globalCounts = screen.getAllByTestId('count-global');
+      expect(globalCounts[1].textContent).toContain('Global1');
     });
 
     it('hides the match count when nothing is typed', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
-      expect(screen.queryByTestId('agent-match-count')).toBeNull();
+      // Both match counts should be hidden
+      const matchCounts = screen.queryAllByTestId('agent-match-count');
+      expect(matchCounts.length).toBe(0);
+      expect(screen.queryByTestId('subagent-match-count')).toBeNull();
     });
 
     /**
@@ -398,7 +417,7 @@ describe('AgentSection', () => {
      * so the empty state offers that rather than the create button.
      */
     it('offers to clear the query when nothing matched', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('nothing-is-called-this');
 
@@ -414,20 +433,24 @@ describe('AgentSection', () => {
     });
 
     it('restores the full list when the query is cleared with the button', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
       type('local-helper');
 
-      fireEvent.click(screen.getByTestId('agent-search-clear'));
+      // Use the subagent clear button (second one)
+      const clearButtons = screen.getAllByTestId('subagent-search-clear');
+      fireEvent.click(clearButtons[0]);
 
       expect(shownNames()).toBe(3);
     });
 
     it('shows no clear button until there is something to clear', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
-      expect(screen.queryByTestId('agent-search-clear')).toBeNull();
+      // Subagent clear button should be hidden initially
+      expect(screen.queryByTestId('subagent-search-clear')).toBeNull();
       type('code');
-      expect(screen.getByTestId('agent-search-clear')).toBeTruthy();
+      // Subagent clear button should appear when searching subagents
+      expect(screen.getByTestId('subagent-search-clear')).toBeTruthy();
     });
 
     /**
@@ -436,7 +459,7 @@ describe('AgentSection', () => {
      * keystroke would make the results flicker between scopes.
      */
     it('does not ask the backend for anything', () => {
-      renderSection({ agents: inventory });
+      renderSection({ storeAgents: storeInventory, subagents: subagentsInventory });
 
       type('code');
 
@@ -452,23 +475,27 @@ describe('AgentSection', () => {
      * scoped by test id rather than by text: a text query would match both and
      * say nothing about which one is being read.
      */
-    const counts = () => screen.getByTestId('agent-scope-counts');
-    const scopeCount = (scope: 'global' | 'local' | 'store') =>
-      screen.getByTestId(`count-${scope}`).textContent ?? '';
+    const counts = (index = 0) => screen.getAllByTestId('agent-scope-counts')[index];
+    const scopeCount = (scope: 'global' | 'local' | 'store', index = 0) =>
+      screen.getAllByTestId(`count-${scope}`)[index]?.textContent ?? '';
 
-    it('counts each scope and totals them', () => {
+    it('counts each scope and totals them per section', () => {
       renderSection({
-        agents: [
+        storeAgents: [storeAgent],
+        subagents: [
           globalAgent,
           { ...globalAgent, id: 'local-1', name: 'l', scope: 'local' },
-          storeAgent,
         ],
       });
 
-      expect(scopeCount('global')).toContain('Global1');
-      expect(scopeCount('local')).toContain('Local1');
-      expect(scopeCount('store')).toContain('Plugin store1');
-      expect(counts().textContent).toContain('Total3');
+      // Store agents section (index 0): 1 store agent
+      expect(scopeCount('store', 0)).toContain('Plugin store1');
+      expect(counts(0).textContent).toContain('Total1');
+
+      // Subagents section (index 1): 1 global, 1 local
+      expect(scopeCount('global', 1)).toContain('Global1');
+      expect(scopeCount('local', 1)).toContain('Local1');
+      expect(counts(1).textContent).toContain('Total2');
     });
 
     /**
@@ -480,24 +507,29 @@ describe('AgentSection', () => {
     it('counts a shadowed name once, under the scope that won', () => {
       renderSection({
         // Three rows on screen even though a fourth definition is shadowed.
-        agents: [globalAgent, storeAgent, { ...storeAgent, id: 's2', name: 'second' }],
+        storeAgents: [storeAgent, { ...storeAgent, id: 's2', name: 'second' }],
+        subagents: [globalAgent],
       });
 
-      expect(scopeCount('global')).toContain('Global1');
-      expect(scopeCount('store')).toContain('Plugin store2');
-      expect(counts().textContent).toContain('Total3');
+      // Store agents section (index 0): 2 store agents
+      expect(scopeCount('store', 0)).toContain('Plugin store2');
+      expect(counts(0).textContent).toContain('Total2');
+
+      // Subagents section (index 1): 1 global
+      expect(scopeCount('global', 1)).toContain('Global1');
+      expect(counts(1).textContent).toContain('Total1');
     });
 
     /** A legacy entry from before discovery has no scope; it lives in the store. */
     it('counts a scopeless legacy entry as store', () => {
-      renderSection({ agents: [{ id: 'legacy', name: 'legacy', prompt: 'x' }] });
+      renderSection({ storeAgents: [{ id: 'legacy', name: 'legacy', prompt: 'x' }] });
 
-      expect(scopeCount('store')).toContain('Plugin store1');
+      expect(scopeCount('store', 0)).toContain('Plugin store1');
       expect(counts().textContent).toContain('Total1');
     });
 
     it('shows a zero rather than hiding a scope with nothing in it', () => {
-      renderSection({ agents: [storeAgent] });
+      renderSection({ storeAgents: [storeAgent] });
 
       // Hiding empty scopes would make the tally move around between opens.
       expect(scopeCount('global')).toContain('Global0');
@@ -505,7 +537,7 @@ describe('AgentSection', () => {
     });
 
     it('shows nothing when there is nothing to count', () => {
-      renderSection({ agents: [] });
+      renderSection({ storeAgents: [], subagents: [] });
 
       expect(screen.queryByTestId('agent-scope-counts')).toBeNull();
     });
@@ -530,7 +562,7 @@ describe('AgentSection', () => {
      * the only way to change one, and it must not be scoped to the broken case.
      */
     it('offers the file for a healthy agent too', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       fireEvent.click(link());
 
@@ -538,7 +570,7 @@ describe('AgentSection', () => {
     });
 
     it('jumps to the line the backend blamed when there is one', () => {
-      renderSection({ agents: [broken] });
+      renderSection({ subagents: [broken] });
 
       fireEvent.click(link());
 
@@ -546,13 +578,13 @@ describe('AgentSection', () => {
     });
 
     it('shows which line it will open at', () => {
-      const { container } = renderSection({ agents: [broken] });
+      const { container } = renderSection({ subagents: [broken] });
 
       expect(container.textContent).toContain(':3');
     });
 
     it('shows the file name', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       expect(screen.getByText('code-reviewer.md')).toBeTruthy();
     });
@@ -574,7 +606,7 @@ describe('AgentSection', () => {
      * open button there without going back up.
      */
     it('is offered again from inside Details', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       fireEvent.click(screen.getByText('Details'));
       fireEvent.click(screen.getByLabelText('Open in editor'));
@@ -592,7 +624,7 @@ describe('AgentSection', () => {
      * control actually exists for.
      */
     it('shows the explanation and the link together for a broken agent', () => {
-      renderSection({ agents: [broken] });
+      renderSection({ subagents: [broken] });
 
       expect(screen.getByTestId('agent-warning').textContent).toContain(
         'invalid YAML in the frontmatter of broken.md'
@@ -603,7 +635,7 @@ describe('AgentSection', () => {
 
   describe('read-only agents', () => {
     it('shows no edit or delete action, and no kebab menu', () => {
-      const { container } = renderSection({ agents: [globalAgent] });
+      const { container } = renderSection({ subagents: [globalAgent] });
 
       expect(screen.queryByText('Edit')).toBeNull();
       expect(screen.queryByText('Delete')).toBeNull();
@@ -611,7 +643,7 @@ describe('AgentSection', () => {
     });
 
     it('marks the read-only badge so the restriction is visible', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ subagents: [globalAgent] });
 
       expect(screen.getByText('Read-only')).toBeTruthy();
     });
@@ -619,7 +651,7 @@ describe('AgentSection', () => {
 
   describe('store agents', () => {
     it('keeps edit and delete available', () => {
-      renderSection({ agents: [storeAgent] });
+      renderSection({ storeAgents: [storeAgent] });
 
       fireEvent.click(screen.getByTitle('Menu'));
 
@@ -629,7 +661,7 @@ describe('AgentSection', () => {
 
     it('invokes the edit callback with the agent', () => {
       const onEdit = vi.fn();
-      renderSection({ agents: [storeAgent], onEdit });
+      renderSection({ storeAgents: [storeAgent], onEdit });
 
       fireEvent.click(screen.getByTitle('Menu'));
       fireEvent.click(screen.getByText('Edit'));
@@ -641,13 +673,15 @@ describe('AgentSection', () => {
 
   describe('empty and loading states', () => {
     it('shows the empty state when discovery finds nothing at all', () => {
-      renderSection({ agents: [] });
+      renderSection({ storeAgents: [], subagents: [] });
 
-      expect(screen.getByText('No custom prompts')).toBeTruthy();
+      // Both sections show the empty state
+      const emptyStates = screen.getAllByText('No custom prompts');
+      expect(emptyStates.length).toBe(2);
     });
 
     it('shows the loading state instead of a stale list', () => {
-      renderSection({ agents: [storeAgent], loading: true });
+      renderSection({ storeAgents: [storeAgent], agentsLoading: true });
 
       expect(screen.getByText('Loading...')).toBeTruthy();
       expect(screen.queryByText('my-prompt')).toBeNull();
@@ -714,11 +748,12 @@ describe('AgentSection', () => {
      * reflow into one line again.
      */
     it('puts the filter on its own row', () => {
-      renderSection({ agents: [globalAgent] });
+      renderSection({ storeAgents: [], subagents: [globalAgent] });
 
       const secondary = screen.getByTestId('agent-header-secondary');
       const actions = screen.getByTestId('agent-header-actions');
-      const search = screen.getByPlaceholderText('Search prompts');
+      // Use the first search input (store agents section header)
+      const search = screen.getAllByPlaceholderText('Search prompts')[0];
 
       expect(secondary.contains(search)).toBe(true);
       expect(secondary.previousElementSibling).toBe(actions.parentElement);
@@ -765,7 +800,7 @@ describe('AgentSection', () => {
     const openDetails = () => fireEvent.click(screen.getByText('Details'));
 
     it('asks the editor for a positive integer line', () => {
-      renderSection({ agents: [{ ...broken, warningLine: 7 }] });
+      renderSection({ subagents: [{ ...broken, warningLine: 7 }] });
 
       fireEvent.click(rowLink());
 
@@ -779,7 +814,7 @@ describe('AgentSection', () => {
      * file, let the user find the problem.
      */
     it('drops a fractional line instead of requesting a jump that cannot land', () => {
-      const { container } = renderSection({ agents: [{ ...broken, warningLine: 2.5 }] });
+      const { container } = renderSection({ subagents: [{ ...broken, warningLine: 2.5 }] });
 
       fireEvent.click(rowLink());
 
@@ -791,7 +826,7 @@ describe('AgentSection', () => {
     it('drops a line that is not positive', () => {
       for (const warningLine of [0, -1]) {
         vi.clearAllMocks();
-        const { unmount } = renderSection({ agents: [{ ...broken, warningLine }] });
+        const { unmount } = renderSection({ subagents: [{ ...broken, warningLine }] });
 
         fireEvent.click(screen.getByLabelText('Open in editor'));
 
@@ -806,14 +841,14 @@ describe('AgentSection', () => {
      * user with two buttons on one agent that disagree about where it opens.
      */
     it('applies the same rule to the File row inside Details', () => {
-      const withLine = renderSection({ agents: [{ ...broken, warningLine: 4 }] });
+      const withLine = renderSection({ subagents: [{ ...broken, warningLine: 4 }] });
       openDetails();
       fireEvent.click(detailsLink());
       expect(openFileMock).toHaveBeenCalledWith('/home/u/.claude/agents/broken.md', 4);
       withLine.unmount();
 
       vi.clearAllMocks();
-      renderSection({ agents: [{ ...broken, warningLine: 2.5 }] });
+      renderSection({ subagents: [{ ...broken, warningLine: 2.5 }] });
       openDetails();
       fireEvent.click(detailsLink());
       expect(openFileMock).toHaveBeenCalledWith('/home/u/.claude/agents/broken.md', undefined);

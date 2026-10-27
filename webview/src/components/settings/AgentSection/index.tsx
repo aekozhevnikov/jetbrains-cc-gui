@@ -7,8 +7,14 @@ import AgentDetailsView from './AgentDetailsView';
 import styles from './style.module.less';
 
 interface AgentSectionProps {
-  agents: AgentConfig[];
-  loading: boolean;
+  /** Store agents (editable, with prompts) */
+  storeAgents: AgentConfig[];
+  /** Discovered subagents (read-only, from ~/.claude/agents and .claude/agents) */
+  subagents: AgentConfig[];
+  /** True when storeAgents is loading */
+  agentsLoading: boolean;
+  /** True when subagents is loading */
+  subagentsLoading: boolean;
   onAdd: () => void;
   onEdit: (agent: AgentConfig) => void;
   onDelete: (agent: AgentConfig) => void;
@@ -112,8 +118,10 @@ function describeConfiguration(agent: AgentConfig, t: (k: string, o?: Record<str
 }
 
 export default function AgentSection({
-  agents,
-  loading,
+  storeAgents,
+  subagents,
+  agentsLoading,
+  subagentsLoading,
   onAdd,
   onEdit,
   onDelete,
@@ -126,17 +134,22 @@ export default function AgentSection({
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [subagentSearchQuery, setSubagentSearchQuery] = useState('');
   const menuRef = useRef<HTMLDivElement>(null);
 
-  const visibleAgents = useMemo(
-    () => filterAgents(agents, searchQuery),
-    [agents, searchQuery]
+  // Filter store agents (custom agents)
+  const visibleStoreAgents = useMemo(
+    () => filterAgents(storeAgents, searchQuery),
+    [storeAgents, searchQuery]
   );
-  // The tally keeps describing the whole inventory rather than the visible
-  // subset: "Total" that dropped to the length of a search result would stop
-  // answering the question the label asks. The match count beside the search
-  // box reports the narrowing instead.
-  const isSearching = searchQuery.trim() !== '';
+  // Filter discovered subagents
+  const visibleSubagents = useMemo(
+    () => filterAgents(subagents, subagentSearchQuery),
+    [subagents, subagentSearchQuery]
+  );
+
+  const isSearchingStore = searchQuery.trim() !== '';
+  const isSearchingSubagents = subagentSearchQuery.trim() !== '';
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -168,6 +181,214 @@ export default function AgentSection({
 
   const handleToggleDetails = (agentId: string) => {
     setExpandedId(expandedId === agentId ? null : agentId);
+  };
+
+  const renderAgentList = ({
+    agents,
+    searchQuery: query,
+    setSearchQuery,
+    isSearching: _isSearching,
+    isLoading,
+    showAddButton,
+    sectionTitle: _sectionTitle,
+    isSubagents,
+  }: {
+    agents: AgentConfig[];
+    searchQuery: string;
+    setSearchQuery: (q: string) => void;
+    isSearching: boolean;
+    isLoading: boolean;
+    showAddButton: boolean;
+    sectionTitle: string;
+    isSubagents: boolean;
+  }) => {
+    const visibleAgents = useMemo(
+      () => filterAgents(agents, query),
+      [agents, query]
+    );
+
+    if (isLoading) {
+      return (
+        <div className={styles.loadingState}>
+          <span className="codicon codicon-loading codicon-modifier-spin" />
+          <span>{t('settings.agent.loading')}</span>
+        </div>
+      );
+    }
+
+    if (agents.length === 0) {
+      return (
+        <div className={styles.emptyState}>
+          <span>{t('settings.agent.noAgents')}</span>
+          {showAddButton && (
+            <button className={styles.createLink} onClick={onAdd}>
+              {t('settings.agent.create')}
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (visibleAgents.length === 0) {
+      return (
+        <div className={styles.emptyState} data-testid="agent-no-matches">
+          <span>{t('settings.agent.noSearchResults', { query: query.trim() })}</span>
+          <button
+            className={styles.createLink}
+            data-testid="agent-no-matches-clear"
+            onClick={() => setSearchQuery('')}
+          >
+            {t('settings.agent.searchClear')}
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className={styles.agentList}>
+        {visibleAgents.map((agent) => {
+          const editable = isAgentEditable(agent);
+          const scope = agent.scope;
+          const configSummary = describeConfiguration(agent, t);
+          const isExpanded = expandedId === agent.id;
+
+          return (
+            <div
+              key={agent.id}
+              className={`${styles.agentCard} ${agent.disabled ? styles.agentCardDisabled : ''}`}
+            >
+              <div className={styles.agentIcon}>
+                <span className="codicon codicon-robot" />
+              </div>
+              <div className={styles.agentInfo}>
+                <div className={styles.agentNameRow}>
+                  <span className={styles.agentName}>{agent.name}</span>
+                  {scope && (
+                    <span
+                      className={`${styles.scopeBadge} ${styles[`scopeBadge_${scope}`] ?? ''}`}
+                      data-testid="agent-scope-badge"
+                    >
+                      {t(SCOPE_LABEL_KEYS[scope], { defaultValue: scope })}
+                    </span>
+                  )}
+                  {agent.readOnly === true && (
+                    <span
+                      className={styles.readOnlyBadge}
+                      title={t('settings.agent.readOnlyHint')}
+                    >
+                      {t('settings.agent.readOnly')}
+                    </span>
+                  )}
+                  {agent.disabled === true && (
+                    <span className={styles.disabledBadge} title={agent.disabledReason}>
+                      {t('settings.agent.disabled')}
+                    </span>
+                  )}
+                </div>
+
+                {agent.description && (
+                  <div className={styles.agentDescription} title={agent.description}>
+                    {agent.description}
+                  </div>
+                )}
+
+                {agent.warning && (
+                  <div className={styles.agentWarning} role="alert" data-testid="agent-warning">
+                    <span className="codicon codicon-warning" />
+                    <span>{agent.warning}</span>
+                  </div>
+                )}
+
+                {/* The deny explanation is shown as text, not left in a
+                    title attribute: a badge the user cannot read until they
+                    happen to hover it is not an explanation. The backend
+                    already resolved the rule, so this only ever displays it. */}
+                {agent.disabled === true && agent.disabledReason && (
+                  <div className={styles.agentWarning} role="status">
+                    <span className="codicon codicon-circle-slash" />
+                    <span>{agent.disabledReason}</span>
+                  </div>
+                )}
+
+                <div className={styles.agentMeta}>
+                  {agent.model && (
+                    <span className={styles.agentModel}>{t('settings.agent.fieldModel')}: {agent.model}</span>
+                  )}
+                  {configSummary && (
+                    <span className={styles.agentConfigSummary}>{configSummary}</span>
+                  )}
+                </div>
+
+                {agent.prompt && !agent.description && (
+                  <div className={styles.agentPrompt} title={agent.prompt}>
+                    {agent.prompt.length > 50
+                      ? agent.prompt.substring(0, 50) + '...'
+                      : agent.prompt}
+                  </div>
+                )}
+
+                <div className={styles.agentInlineActions}>
+                  {/* The one edit a file-backed agent has. Opening the
+                      file is how its author changes it, so the control is
+                      on every discovered agent rather than only on the
+                      broken ones the warning block happens to contain. It
+                      jumps to the blamed line when the parser named one,
+                      because a caret at the top of a file whose problem is
+                      on line 4 is not a shortcut to the fix. */}
+                  {isSubagents && typeof agent.path === 'string' && agent.path.length > 0 && (
+                    <AgentFileLink agent={agent} t={t} />
+                  )}
+
+                  <button
+                    className={styles.detailsToggle}
+                    onClick={() => handleToggleDetails(agent.id)}
+                    aria-expanded={isExpanded}
+                  >
+                    <span className={`codicon ${isExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} />
+                    {isExpanded
+                      ? t('settings.agent.hideDetails')
+                      : t('settings.agent.showDetails')}
+                  </button>
+
+                </div>
+
+                {isExpanded && <AgentDetailsView agent={agent} t={t} />}
+              </div>
+
+              {/* The menu holds only mutating actions. A file-backed agent
+                  has none of them, so it gets no menu rather than a menu of
+                  disabled items — the copy action sits inline instead. */}
+              {editable && (
+                <div className={styles.agentActions} ref={openMenuId === agent.id ? menuRef : null}>
+                  <button
+                    className={styles.menuButton}
+                    onClick={() => handleMenuToggle(agent.id)}
+                    title={t('settings.agent.menu')}
+                  >
+                    <span className="codicon codicon-kebab-vertical" />
+                  </button>
+                  {openMenuId === agent.id && (
+                    <div className={styles.dropdownMenu}>
+                      <button className={styles.menuItem} onClick={() => handleEditClick(agent)}>
+                        <span className="codicon codicon-edit" />
+                        {t('common.edit')}
+                      </button>
+                      <button
+                        className={`${styles.menuItem} ${styles.danger}`}
+                        onClick={() => handleDeleteClick(agent)}
+                      >
+                        <span className="codicon codicon-trash" />
+                        {t('common.delete')}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    );
   };
 
   return (
@@ -231,11 +452,11 @@ export default function AgentSection({
 
           {/* The narrowing is reported here rather than by shrinking the tally
               above, so "Total" keeps describing the whole inventory. */}
-          {isSearching && (
+          {isSearchingStore && (
             <span className={styles.matchCount} data-testid="agent-match-count">
               {t('settings.agent.matchCount', {
-                shown: visibleAgents.length,
-                total: agents.length,
+                shown: visibleStoreAgents.length,
+                total: storeAgents.length,
               })}
             </span>
           )}
@@ -244,180 +465,75 @@ export default function AgentSection({
 
       </div>
 
+      {/* Section 1: Custom Agents (store agents - editable, with prompts) */}
       <div className={styles.section}>
         <div className={styles.sectionHeaderRow}>
           <h4 className={styles.sectionTitle}>{t('settings.agent.customAgents')}</h4>
-          <ScopeCounts agents={agents} t={t} />
+          <ScopeCounts agents={storeAgents} t={t} />
         </div>
 
-        {loading ? (
-          <div className={styles.loadingState}>
-            <span className="codicon codicon-loading codicon-modifier-spin" />
-            <span>{t('settings.agent.loading')}</span>
+        {renderAgentList({
+          agents: storeAgents,
+          searchQuery,
+          setSearchQuery,
+          isSearching: isSearchingStore,
+          isLoading: agentsLoading,
+          showAddButton: true,
+          sectionTitle: t('settings.agent.customAgents'),
+          isSubagents: false,
+        })}
+      </div>
+
+      {/* Section 2: Claude Code Subagents (discovered - read-only) */}
+      <div className={styles.section}>
+        <div className={styles.sectionHeaderRow}>
+          <h4 className={styles.sectionTitle}>{t('settings.agent.claudeCodeSubagents')}</h4>
+          <ScopeCounts agents={subagents} t={t} />
+        </div>
+
+        <div className={styles.section} style={{ marginTop: 8 }}>
+          <div className={styles.searchBox} style={{ maxWidth: 400 }}>
+            <span className="codicon codicon-search" />
+            <input
+              type="text"
+              className={styles.searchInput}
+              placeholder={t('settings.agent.searchPlaceholder')}
+              value={subagentSearchQuery}
+              onChange={(event) => setSubagentSearchQuery(event.target.value)}
+              aria-label={t('settings.agent.searchPlaceholder')}
+            />
+            {subagentSearchQuery !== '' && (
+              <button
+                className={styles.searchClear}
+                data-testid="subagent-search-clear"
+                onClick={() => setSubagentSearchQuery('')}
+                title={t('settings.agent.searchClear')}
+                aria-label={t('settings.agent.searchClear')}
+              >
+                <span className="codicon codicon-close" />
+              </button>
+            )}
           </div>
-        ) : agents.length === 0 ? (
-          <div className={styles.emptyState}>
-            <span>{t('settings.agent.noAgents')}</span>
-            <button className={styles.createLink} onClick={onAdd}>
-              {t('settings.agent.create')}
-            </button>
-          </div>
-        ) : visibleAgents.length === 0 ? (
-          // Distinct from "you have no agents": here the inventory is full and
-          // the query is what came up empty, so the fix is to change the query.
-          <div className={styles.emptyState} data-testid="agent-no-matches">
-            <span>{t('settings.agent.noSearchResults', { query: searchQuery.trim() })}</span>
-            <button
-              className={styles.createLink}
-              data-testid="agent-no-matches-clear"
-              onClick={() => setSearchQuery('')}
-            >
-              {t('settings.agent.searchClear')}
-            </button>
-          </div>
-        ) : (
-          <div className={styles.agentList}>
-            {visibleAgents.map((agent) => {
-              const editable = isAgentEditable(agent);
-              const scope = agent.scope;
-              const configSummary = describeConfiguration(agent, t);
-              const isExpanded = expandedId === agent.id;
+          {isSearchingSubagents && (
+            <span className={styles.matchCount} data-testid="subagent-match-count">
+              {t('settings.agent.matchCount', {
+                shown: visibleSubagents.length,
+                total: subagents.length,
+              })}
+            </span>
+          )}
+        </div>
 
-              return (
-                <div
-                  key={agent.id}
-                  className={`${styles.agentCard} ${agent.disabled ? styles.agentCardDisabled : ''}`}
-                >
-                  <div className={styles.agentIcon}>
-                    <span className="codicon codicon-robot" />
-                  </div>
-                  <div className={styles.agentInfo}>
-                    <div className={styles.agentNameRow}>
-                      <span className={styles.agentName}>{agent.name}</span>
-                      {scope && (
-                        <span
-                          className={`${styles.scopeBadge} ${styles[`scopeBadge_${scope}`] ?? ''}`}
-                          data-testid="agent-scope-badge"
-                        >
-                          {t(SCOPE_LABEL_KEYS[scope], { defaultValue: scope })}
-                        </span>
-                      )}
-                      {agent.readOnly === true && (
-                        <span
-                          className={styles.readOnlyBadge}
-                          title={t('settings.agent.readOnlyHint')}
-                        >
-                          {t('settings.agent.readOnly')}
-                        </span>
-                      )}
-                      {agent.disabled === true && (
-                        <span className={styles.disabledBadge} title={agent.disabledReason}>
-                          {t('settings.agent.disabled')}
-                        </span>
-                      )}
-                    </div>
-
-                    {agent.description && (
-                      <div className={styles.agentDescription} title={agent.description}>
-                        {agent.description}
-                      </div>
-                    )}
-
-                    {agent.warning && (
-                      <div className={styles.agentWarning} role="alert" data-testid="agent-warning">
-                        <span className="codicon codicon-warning" />
-                        <span>{agent.warning}</span>
-                      </div>
-                    )}
-
-                    {/* The deny explanation is shown as text, not left in a
-                        title attribute: a badge the user cannot read until they
-                        happen to hover it is not an explanation. The backend
-                        already resolved the rule, so this only ever displays it. */}
-                    {agent.disabled === true && agent.disabledReason && (
-                      <div className={styles.agentWarning} role="status">
-                        <span className="codicon codicon-circle-slash" />
-                        <span>{agent.disabledReason}</span>
-                      </div>
-                    )}
-
-                    <div className={styles.agentMeta}>
-                      {agent.model && (
-                        <span className={styles.agentModel}>{t('settings.agent.fieldModel')}: {agent.model}</span>
-                      )}
-                      {configSummary && (
-                        <span className={styles.agentConfigSummary}>{configSummary}</span>
-                      )}
-                    </div>
-
-                    {agent.prompt && !agent.description && (
-                      <div className={styles.agentPrompt} title={agent.prompt}>
-                        {agent.prompt.length > 50
-                          ? agent.prompt.substring(0, 50) + '...'
-                          : agent.prompt}
-                      </div>
-                    )}
-
-                    <div className={styles.agentInlineActions}>
-                      {/* The one edit a file-backed agent has. Opening the
-                          file is how its author changes it, so the control is
-                          on every discovered agent rather than only on the
-                          broken ones the warning block happens to contain. It
-                          jumps to the blamed line when the parser named one,
-                          because a caret at the top of a file whose problem is
-                          on line 4 is not a shortcut to the fix. */}
-                      <AgentFileLink agent={agent} t={t} />
-
-                      <button
-                        className={styles.detailsToggle}
-                        onClick={() => handleToggleDetails(agent.id)}
-                        aria-expanded={isExpanded}
-                      >
-                        <span className={`codicon ${isExpanded ? 'codicon-chevron-down' : 'codicon-chevron-right'}`} />
-                        {isExpanded
-                          ? t('settings.agent.hideDetails')
-                          : t('settings.agent.showDetails')}
-                      </button>
-
-                    </div>
-
-                    {isExpanded && <AgentDetailsView agent={agent} t={t} />}
-                  </div>
-
-                  {/* The menu holds only mutating actions. A file-backed agent
-                      has none of them, so it gets no menu rather than a menu of
-                      disabled items — the copy action sits inline instead. */}
-                  {editable && (
-                    <div className={styles.agentActions} ref={openMenuId === agent.id ? menuRef : null}>
-                      <button
-                        className={styles.menuButton}
-                        onClick={() => handleMenuToggle(agent.id)}
-                        title={t('settings.agent.menu')}
-                      >
-                        <span className="codicon codicon-kebab-vertical" />
-                      </button>
-                      {openMenuId === agent.id && (
-                        <div className={styles.dropdownMenu}>
-                          <button className={styles.menuItem} onClick={() => handleEditClick(agent)}>
-                            <span className="codicon codicon-edit" />
-                            {t('common.edit')}
-                          </button>
-                          <button
-                            className={`${styles.menuItem} ${styles.danger}`}
-                            onClick={() => handleDeleteClick(agent)}
-                          >
-                            <span className="codicon codicon-trash" />
-                            {t('common.delete')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+        {renderAgentList({
+          agents: subagents,
+          searchQuery: subagentSearchQuery,
+          setSearchQuery: setSubagentSearchQuery,
+          isSearching: isSearchingSubagents,
+          isLoading: subagentsLoading,
+          showAddButton: false,
+          sectionTitle: t('settings.agent.claudeCodeSubagents'),
+          isSubagents: true,
+        })}
       </div>
     </div>
   );

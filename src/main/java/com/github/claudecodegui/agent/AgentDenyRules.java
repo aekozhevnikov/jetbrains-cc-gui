@@ -313,4 +313,75 @@ public final class AgentDenyRules {
     public static Path currentSettingsPath() {
         return Paths.get(NodeDetector.resolveHomeForFileOps(), CLAUDE_DIR, SETTINGS_FILE);
     }
+
+    /**
+     * Read deny rules from the full settings hierarchy.
+     * <p>
+     * Priority order (highest first, so later entries override earlier):
+     * 1. User-level: ~/.claude/settings.json
+     * 2. Project-level: {workspace}/.claude/settings.json
+     * 3. Project local: {workspace}/.claude/settings.local.json
+     * 4. Managed settings (if available)
+     * <p>
+     * Rules are merged: a deny in a higher-priority file overrides an allow in a lower one.
+     * The wildcard "Agent(*)" denies all agents.
+     *
+     * @param workspaceRoot the effective working directory, or null for user-level only
+     * @return combined deny rules from all applicable settings files
+     */
+    public static DenyIndex readForProject(String workspaceRoot) {
+        List<DenyIndex> allIndexes = new ArrayList<>();
+
+        // 1. User-level settings (lowest priority)
+        allIndexes.add(read(currentSettingsPath()));
+
+        // 2. Project-level settings
+        if (workspaceRoot != null && !workspaceRoot.isBlank()) {
+            Path projectSettings = Paths.get(workspaceRoot, CLAUDE_DIR, SETTINGS_FILE);
+            allIndexes.add(read(projectSettings));
+
+            // 3. Project local settings (.local.json)
+            Path projectLocalSettings = Paths.get(workspaceRoot, CLAUDE_DIR, "settings.local.json");
+            allIndexes.add(read(projectLocalSettings));
+        }
+
+        // 4. Managed settings (platform-managed, e.g., enterprise policy)
+        // Path varies by platform; common locations:
+        // Linux: /etc/claude/settings.json
+        // macOS: /Library/Application Support/Claude/settings.json
+        // Windows: %PROGRAMDATA%\Claude\settings.json
+        // We'll check a few common locations
+        List<Path> managedPaths = List.of(
+                Paths.get("/etc/claude/settings.json"),
+                Paths.get("/Library/Application Support/Claude/settings.json"),
+                Paths.get(System.getenv("PROGRAMDATA") != null ? System.getenv("PROGRAMDATA") : "", "Claude/settings.json")
+        );
+        for (Path managedPath : managedPaths) {
+            if (Files.isRegularFile(managedPath)) {
+                allIndexes.add(read(managedPath));
+            }
+        }
+
+        // Merge all indexes: later (higher priority) override earlier
+        Set<String> mergedNames = new LinkedHashSet<>();
+        List<String> mergedParameterRules = new ArrayList<>();
+        boolean mergedDenyAll = false;
+        List<String> mergedProblems = new ArrayList<>();
+
+        for (DenyIndex index : allIndexes) {
+            mergedNames.addAll(index.deniedNames());
+            mergedParameterRules.addAll(index.parameterRules());
+            if (index.denyAll()) {
+                mergedDenyAll = true;
+            }
+            mergedProblems.addAll(index.problems());
+        }
+
+        return new DenyIndex(
+                Collections.unmodifiableSet(mergedNames),
+                mergedDenyAll,
+                List.copyOf(mergedParameterRules),
+                List.copyOf(mergedProblems)
+        );
+    }
 }

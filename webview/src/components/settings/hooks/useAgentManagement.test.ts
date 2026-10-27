@@ -55,24 +55,28 @@ describe('useAgentManagement', () => {
   });
 
   describe('loadAgents', () => {
-    it('asks for every scope so the backend can apply precedence', () => {
+    it('asks for store scope for get_agents and global+local for get_subagents', () => {
       const { result } = renderHook(() => useAgentManagement());
 
       act(() => result.current.loadAgents());
 
-      const listRequest = sentCommands().find((c) => c.command === 'get_agents');
-      expect(listRequest?.body).toEqual({ scopes: ['global', 'local', 'store'] });
+      const agentsRequest = sentCommands().find((c) => c.command === 'get_agents');
+      const subagentsRequest = sentCommands().find((c) => c.command === 'get_subagents');
+
+      expect(agentsRequest?.body).toEqual({ scopes: ['store'] });
+      expect(subagentsRequest?.body).toEqual({ scopes: ['global', 'local'] });
     });
 
-    it('sends a single request, with no second call for a side channel', () => {
+    it('sends two requests: get_agents for store and get_subagents for discovered', () => {
       const { result } = renderHook(() => useAgentManagement());
       sendToJava.mockClear();
 
       act(() => result.current.loadAgents());
 
-      // The list is the whole state this tab keeps. A second request whose
-      // answer arrived independently could disagree with the list beside it.
-      expect(sentCommands().map((c) => c.command)).toEqual(['get_agents']);
+      // The hook now separates store agents (for chat bar) from discovered subagents (for Settings)
+      const commands = sentCommands().map((c) => c.command);
+      expect(commands).toContain('get_agents');
+      expect(commands).toContain('get_subagents');
     });
   });
 
@@ -82,23 +86,28 @@ describe('useAgentManagement', () => {
      * re-reads rather than being handed a list, so precedence and containment
      * stay the backend's job.
      */
-    it('re-requests the list when a file changed', () => {
+    it('re-requests both store agents and subagents when a file changed', () => {
       const { result } = renderHook(() => useAgentManagement());
       sendToJava.mockClear();
 
       act(() => result.current.refreshAgentsQuietly());
 
-      expect(sentCommands().some((c) => c.command === 'get_agents')).toBe(true);
+      const commands = sentCommands().map((c) => c.command);
+      expect(commands).toContain('get_agents');
+      expect(commands).toContain('get_subagents');
     });
 
-    it('asks for every scope, so a shadowed agent still resolves correctly', () => {
+    it('asks for store scope in get_agents and global+local in get_subagents', () => {
       const { result } = renderHook(() => useAgentManagement());
       sendToJava.mockClear();
 
       act(() => result.current.refreshAgentsQuietly());
 
-      const request = sentCommands().find((c) => c.command === 'get_agents');
-      expect(request?.body).toEqual({ scopes: ['global', 'local', 'store'] });
+      const agentsRequest = sentCommands().find((c) => c.command === 'get_agents');
+      const subagentsRequest = sentCommands().find((c) => c.command === 'get_subagents');
+
+      expect(agentsRequest?.body).toEqual({ scopes: ['store'] });
+      expect(subagentsRequest?.body).toEqual({ scopes: ['global', 'local'] });
     });
 
     /**

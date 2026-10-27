@@ -12,6 +12,9 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.FileVisitResult;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -47,11 +50,11 @@ import java.util.Set;
  *
  * <h2>Scan semantics</h2>
  *
- * <p>Top-level {@code *.md} only, no recursion — a subdirectory is invisible to
- * Claude Code too, and listing it would promise an agent the runtime will not
- * load. Bodies are never read: every file goes through
- * {@link SubagentFrontmatterParser#parse(Path)}, which streams and stops at the
- * closing delimiter, so a 200 KB system prompt costs the same as a 60-byte
+ * <p>Recursive {@code *.md} scan — Claude Code scans {@code .claude/agents/} and
+ * {@code ~/.claude/agents/} recursively, so subfolders like {@code agents/review/}
+ * or {@code agents/research/} are included. Bodies are never read: every file goes
+ * through {@link SubagentFrontmatterParser#parse(Path)}, which streams and stops at
+ * the closing delimiter, so a 200 KB system prompt costs the same as a 60-byte
  * frontmatter. There is deliberately no cache, matching the skills scan; the
  * sweep is a directory listing plus a bounded read per file, and the
  * alternative is a staleness bug across two roots and a settings dialog.
@@ -427,7 +430,7 @@ public final class SubagentDiscoveryScanner {
                     + escapedRoot.message());
         }
 
-        List<Path> candidates = listTopLevel(root);
+        List<Path> candidates = listRecursive(root);
         if (candidates == null) {
             return new ScanResult(List.of(), List.copyOf(warnings));
         }
@@ -584,21 +587,34 @@ public final class SubagentDiscoveryScanner {
     }
 
     /**
-     * The candidate file names in a directory, sorted, or null if it cannot be
-     * listed.
+     * Recursively collect all candidate {@code *.md} files under the root.
      *
      * <p>Sorted so two passes over an unchanged directory report the same
      * order — the merge and precedence steps downstream should not depend on
      * the filesystem's whim.
      */
-    private static List<Path> listTopLevel(Path root) {
+    private static List<Path> listRecursive(Path root) {
         List<Path> candidates = new ArrayList<>();
-        try (DirectoryStream<Path> stream = Files.newDirectoryStream(root)) {
-            for (Path entry : stream) {
-                candidates.add(entry);
-            }
+        try {
+            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                    if (attrs.isRegularFile()) {
+                        candidates.add(file);
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                    // Don't fail the whole walk if one file is unreadable
+                    LOG.debug("[AgentDiscovery] Cannot access " + LogSanitizer.sanitize(file.toString())
+                            + ": " + exc.getClass().getSimpleName());
+                    return FileVisitResult.CONTINUE;
+                }
+            });
         } catch (IOException e) {
-            LOG.warn("[AgentDiscovery] Cannot list agents directory " + LogSanitizer.sanitize(root.toString())
+            LOG.warn("[AgentDiscovery] Cannot walk agents directory " + LogSanitizer.sanitize(root.toString())
                     + ": " + e.getClass().getSimpleName());
             return null;
         }

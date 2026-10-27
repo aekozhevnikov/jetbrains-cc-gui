@@ -690,6 +690,11 @@ interface Window {
   updateAgents?: (json: string) => void;
 
   /**
+   * Update discovered subagents list (for Settings tab)
+   */
+  updateSubagents?: (json: string) => void;
+
+  /**
    * Agent operation result callback
    */
   agentOperationResult?: (json: string) => void;

@@ -835,6 +835,7 @@
       "scopeGlobal": "Глобальный",
       "scopeLocal": "Локальный",
       "scopeStore": "Хранилище плагина",
+      "claudeCodeSubagents": "Суб-агенты Claude Code",
       "readOnly": "Только чтение",
       "readOnlyHint": "Обнаружен в файле агента Claude Code. Плагин никогда не пишет в него — скопируйте, чтобы внести правки.",
       "disabled": "Заблокирован",

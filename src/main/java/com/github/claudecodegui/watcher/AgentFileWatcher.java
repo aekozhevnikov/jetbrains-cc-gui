@@ -81,6 +81,9 @@ public class AgentFileWatcher implements BulkFileListener {
     /** Guards the debounce so a burst produces one notification, not one per event. */
     private final AtomicBoolean pending = new AtomicBoolean(false);
 
+    /** Cached roots to avoid disk I/O on EDT. Updated on each event batch. */
+    private volatile List<Path> cachedRoots;
+
     private MessageBusConnection connection;
 
     /**
@@ -104,7 +107,8 @@ public class AgentFileWatcher implements BulkFileListener {
         if (events == null || events.isEmpty()) {
             return;
         }
-        List<Path> roots = currentRoots();
+        // Refresh cache on VFS thread (not EDT) to avoid disk I/O on EDT
+        List<Path> roots = refreshRootsCache();
         for (VFileEvent event : events) {
             VirtualFile file = event.getFile();
             if (file != null && isAgentFilePath(file.getPath(), file.isDirectory(), roots)) {
@@ -117,8 +121,8 @@ public class AgentFileWatcher implements BulkFileListener {
     /**
      * Whether a changed path is one discovery would have looked at.
      *
-     * <p>A direct child of a root, ending in {@code .md}. A false positive costs
-     * one wasted rescan and nothing else — the rescan applies the real
+     * <p>A file under a root (recursively), ending in {@code .md}. A false positive
+     * costs one wasted rescan and nothing else — the rescan applies the real
      * containment checks — so the test stays cheap and this stays simple. A
      * false <em>negative</em> is the expensive direction, and is what the cases
      * below pin: the extension comparison is case-insensitive because
@@ -154,22 +158,17 @@ public class AgentFileWatcher implements BulkFileListener {
             // the kind of guess the containment rules elsewhere refuse.
             return false;
         }
-        // Compared against the root itself, not the root's parent: discovery is
-        // non-recursive, so only a top-level document is its business.
-        //
-        // On a case-insensitive filesystem the VFS can hand back the same
-        // directory the root was built from with its case as stored on disk,
-        // which differs from the spelling NodeDetector and the working
-        // directory produced. Path.equals compares the path element by element,
-        // so it would call that a non-match and the watcher would sit quiet
-        // while discovery listed the file. Normalising the comparison key
-        // fixes that without touching the filesystem: the equality is still
-        // exact on the normalised form, never a prefix test, and no path is
-        // resolved or rewritten to make it match.
+        // Discovery is now recursive, so check if the file's parent is under
+        // any root (not just a direct child). Use startsWith on normalized
+        // paths to handle case-insensitive filesystems.
         String parentKey = comparisonKey(parent);
         for (Path root : roots) {
-            if (root != null && comparisonKey(root).equals(parentKey)) {
-                return true;
+            if (root != null) {
+                String rootKey = comparisonKey(root);
+                // Check if parent is the root or a subdirectory of the root
+                if (parentKey.equals(rootKey) || parentKey.startsWith(rootKey + "/")) {
+                    return true;
+                }
             }
         }
         return false;
@@ -198,7 +197,23 @@ public class AgentFileWatcher implements BulkFileListener {
      * root that simply never matches, matching discovery: the tab has to work
      * on a machine that has never run Claude Code.
      */
+    /**
+     * Get the current roots, using cache to avoid disk I/O on EDT.
+     * The cache is refreshed on each event batch in {@link #after}.
+     */
     private List<Path> currentRoots() {
+        if (cachedRoots != null) {
+            return cachedRoots;
+        }
+        // First call or cache invalidated - compute and cache
+        return refreshRootsCache();
+    }
+
+    /**
+     * Refresh the roots cache. Called from {@link #after} on the VFS thread,
+     * not the EDT, so disk I/O here is acceptable.
+     */
+    private List<Path> refreshRootsCache() {
         List<Path> roots = new ArrayList<>(2);
 
         String home = NodeDetector.resolveHomeForFileOps();
@@ -210,7 +225,8 @@ public class AgentFileWatcher implements BulkFileListener {
         if (workspace != null && !workspace.isBlank()) {
             roots.add(Paths.get(workspace, CLAUDE_DIR, AGENTS_DIR));
         }
-        return roots;
+        cachedRoots = List.copyOf(roots);
+        return cachedRoots;
     }
 
     /**
