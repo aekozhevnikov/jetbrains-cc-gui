@@ -10,6 +10,7 @@ import com.github.claudecodegui.handler.core.HandlerContext;
 import com.github.claudecodegui.util.LogSanitizer;
 import com.github.claudecodegui.watcher.AgentFileWatcher;
 import com.github.claudecodegui.settings.CodemossSettingsService;
+import com.github.claudecodegui.model.AgentFields;
 import com.github.claudecodegui.model.ConflictStrategy;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -196,8 +197,8 @@ public class AgentHandler extends BaseMessageHandler {
                         .toList();
             }
 
-            AgentResolver.Resolution resolution = AgentResolver.resolve(
-                    storeAgents, null, AgentDenyRules.readForProject(context.resolveEffectiveWorkingDirectory()), filteredScopes);
+            AgentResolver.Resolution resolution = AgentResolver.resolveStoreAgents(
+                    storeAgents, filteredScopes);
 
             String agentsJson = gson.toJson(resolution.agents());
             ApplicationManager.getApplication().invokeLater(() -> {
@@ -266,9 +267,9 @@ public class AgentHandler extends BaseMessageHandler {
             String workspaceRoot = context.resolveEffectiveWorkingDirectory();
             SubagentDiscoveryScanner.ScanResult scan = SubagentDiscoveryScanner.scanAll(workspaceRoot);
 
-            // Resolve with empty store agents - we only want discovered agents
-            AgentResolver.Resolution resolution = AgentResolver.resolve(
-                    List.of(), scan, AgentDenyRules.readForProject(workspaceRoot), filteredScopes);
+            // Resolve discovered subagents only
+            AgentResolver.Resolution resolution = AgentResolver.resolveSubagents(
+                    scan, AgentDenyRules.readForProject(workspaceRoot), filteredScopes);
 
             if (!resolution.unmatchedDenyRules().isEmpty()) {
                 resolution.unmatchedDenyRules().forEach(rule ->
@@ -529,7 +530,13 @@ public class AgentHandler extends BaseMessageHandler {
 
                 JsonArray agentsArray = new JsonArray();
                 for (JsonObject agent : agents) {
-                    agentsArray.add(agent);
+                    // Strip server-computed metadata fields on export
+                    // These are forced to correct values on import anyway
+                    JsonObject exportAgent = agent.deepCopy();
+                    exportAgent.remove("scope");
+                    exportAgent.remove("source");
+                    exportAgent.remove("readOnly");
+                    agentsArray.add(exportAgent);
                 }
                 exportData.add("agents", agentsArray);
 
@@ -695,7 +702,14 @@ public class AgentHandler extends BaseMessageHandler {
 
             List<JsonObject> agentsToImport = new java.util.ArrayList<>();
             for (int i = 0; i < agentsArray.size(); i++) {
-                agentsToImport.add(agentsArray.get(i).getAsJsonObject());
+                JsonObject agent = agentsArray.get(i).getAsJsonObject();
+                // Strip server-computed metadata fields on import
+                // These are forced to correct values by storeWire
+                JsonObject importAgent = agent.deepCopy();
+                importAgent.remove("scope");
+                importAgent.remove("source");
+                importAgent.remove("readOnly");
+                agentsToImport.add(importAgent);
             }
 
             Map<String, Object> result = settingsService.getAgentManager().batchImportAgents(agentsToImport, strategy);

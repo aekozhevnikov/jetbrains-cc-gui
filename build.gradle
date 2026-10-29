@@ -95,12 +95,6 @@ repositories {
     maven { url 'https://maven.aliyun.com/repository/public' }
     mavenCentral()
 
-    // IntelliJ Platform SDK mirrors (alternative sources for ideaIC download)
-    // packages.jetbrains.team is the official JetBrains Maven repository
-    maven { url 'https://packages.jetbrains.team/maven/p/intellij-platform/release' }
-    // Tencent mirror for JetBrains artifacts
-    maven { url 'https://mirrors.cloud.tencent.com/jetbrains/' }
-
     intellijPlatform {
         defaultRepositories()
     }

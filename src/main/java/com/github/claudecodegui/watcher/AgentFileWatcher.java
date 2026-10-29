@@ -32,16 +32,16 @@ import java.util.function.Supplier;
  *
  * <p>It only answers "did something inside a discovery root change". It does not
  * read the file, does not parse it, and does not build a list. The rescan stays
- * where the containment checks live — {@code get_agents} — and this class merely
+ * where the containment checks live — {@code get_subagents} — and this class merely
  * asks for it. That split is the point: a change detector that went on to read
  * the changed file would be a second, less careful path to the same bytes, and
  * the one place that decides what is safe to read would no longer be the only
  * one.
  *
- * <p>Roots are resolved on every event rather than captured at construction. The
- * workspace can be repointed at a custom working directory while the window is
- * open, and a watcher holding the roots it was built with would keep watching
- * the directory the user has since left.
+ * <p>Roots are resolved at startup and cached. The cache is refreshed only when
+ * the effective working directory changes, avoiding disk I/O on the EDT.
+ * A custom working directory configured while the window is open is detected
+ * by comparing the previously cached workspace root with the current one.
  *
  * <h2>Debouncing</h2>
  *
@@ -81,8 +81,11 @@ public class AgentFileWatcher implements BulkFileListener {
     /** Guards the debounce so a burst produces one notification, not one per event. */
     private final AtomicBoolean pending = new AtomicBoolean(false);
 
-    /** Cached roots to avoid disk I/O on EDT. Updated on each event batch. */
+    /** Cached roots to avoid disk I/O on EDT. */
     private volatile List<Path> cachedRoots;
+
+    /** Cached workspace root to detect changes. */
+    private volatile String cachedWorkspaceRoot;
 
     private MessageBusConnection connection;
 
@@ -107,8 +110,8 @@ public class AgentFileWatcher implements BulkFileListener {
         if (events == null || events.isEmpty()) {
             return;
         }
-        // Refresh cache on VFS thread (not EDT) to avoid disk I/O on EDT
-        List<Path> roots = refreshRootsCache();
+        // Use cached roots to avoid disk I/O. Refresh only if workspace root changed.
+        List<Path> roots = getRootsWithCache();
         for (VFileEvent event : events) {
             VirtualFile file = event.getFile();
             if (file != null && isAgentFilePath(file.getPath(), file.isDirectory(), roots)) {
@@ -121,35 +124,39 @@ public class AgentFileWatcher implements BulkFileListener {
     /**
      * Whether a changed path is one discovery would have looked at.
      *
-     * <p>A file under a root (recursively), ending in {@code .md}. A false positive
-     * costs one wasted rescan and nothing else — the rescan applies the real
-     * containment checks — so the test stays cheap and this stays simple. A
-     * false <em>negative</em> is the expensive direction, and is what the cases
-     * below pin: the extension comparison is case-insensitive because
-     * discovery's own filter is, and the root comparison is too, because on a
-     * case-insensitive filesystem — the default on macOS and Windows — the
-     * scanner and the watcher can be handed the same directory spelled
-     * differently. A watcher that disagreed would miss a file the scan lists,
-     * and the settings list would go stale until it was reopened.
+     * <p>A file or directory under a root (recursively), ending in {@code .md} for
+     * files. A false positive costs one wasted rescan and nothing else — the
+     * rescan applies the real containment checks — so the test stays cheap and
+     * this stays simple. A false <em>negative</em> is the expensive direction,
+     * and is what the cases below pin: the extension comparison is
+     * case-insensitive because discovery's own filter is, and the root
+     * comparison uses {@link Path#startsWith(Path)} which handles
+     * case-insensitive filesystems correctly (the default on macOS and Windows).
+     * A watcher that disagreed would miss a file the scan lists, and the
+     * settings list would go stale until it was reopened.
+     *
+     * <p>Directory events are also reported because deleting, renaming, moving or
+     * copying a whole subfolder should trigger a refresh — the contained
+     * {@code .md} files would then be added or removed by the rescan.
      *
      * <p>Takes a path rather than a {@link VirtualFile} so the rule is directly
      * testable without the platform fixtures.
      *
-     * @param path       the VFS path of the changed file
+     * @param path       the VFS path of the changed file or directory
      * @param isDirectory whether that path is a directory
      * @param roots      the discovery roots, as of this event
      * @return true when the change is one discovery cares about
      */
     static boolean isAgentFilePath(String path, boolean isDirectory, List<Path> roots) {
-        // A directory named agents/ is not a file inside it, and a `.md`
-        // directory would otherwise be indistinguishable from a document.
-        if (isDirectory) {
-            return false;
-        }
         Path file = Paths.get(path);
         Path fileName = file.getFileName();
-        if (fileName == null
-                || !fileName.toString().toLowerCase(Locale.ROOT).endsWith(MARKDOWN_EXTENSION)) {
+        if (fileName == null) {
+            return false;
+        }
+        // For files, check .md extension. For directories, accept any name
+        // (a directory inside the agents tree could contain agent files).
+        if (!isDirectory
+                && !fileName.toString().toLowerCase(Locale.ROOT).endsWith(MARKDOWN_EXTENSION)) {
             return false;
         }
         Path parent = file.getParent();
@@ -158,17 +165,12 @@ public class AgentFileWatcher implements BulkFileListener {
             // the kind of guess the containment rules elsewhere refuse.
             return false;
         }
-        // Discovery is now recursive, so check if the file's parent is under
-        // any root (not just a direct child). Use startsWith on normalized
-        // paths to handle case-insensitive filesystems.
-        String parentKey = comparisonKey(parent);
+        // Discovery is recursive, so check if the path's parent is under
+        // any root (not just a direct child). Use Path.startsWith for
+        // cross-platform path comparison (handles Windows \ vs /).
         for (Path root : roots) {
-            if (root != null) {
-                String rootKey = comparisonKey(root);
-                // Check if parent is the root or a subdirectory of the root
-                if (parentKey.equals(rootKey) || parentKey.startsWith(rootKey + "/")) {
-                    return true;
-                }
+            if (root != null && (parent.equals(root) || parent.startsWith(root))) {
+                return true;
             }
         }
         return false;
@@ -190,30 +192,31 @@ public class AgentFileWatcher implements BulkFileListener {
     }
 
     /**
+     * /**
      * The two roots, resolved now.
      *
      * <p>{@code ~/.claude/agents} always, plus the effective project's
      * {@code .claude/agents} when there is one. A missing directory yields a
      * root that simply never matches, matching discovery: the tab has to work
      * on a machine that has never run Claude Code.
+     *
+     * <p>Roots are cached and refreshed only when the workspace root changes,
+     * avoiding disk I/O on the EDT.
      */
-    /**
-     * Get the current roots, using cache to avoid disk I/O on EDT.
-     * The cache is refreshed on each event batch in {@link #after}.
-     */
-    private List<Path> currentRoots() {
-        if (cachedRoots != null) {
+    private List<Path> getRootsWithCache() {
+        String currentWorkspace = workspaceRootSupplier == null ? null : workspaceRootSupplier.get();
+        if (cachedRoots != null && cachedWorkspaceRoot != null
+                && cachedWorkspaceRoot.equals(currentWorkspace)) {
             return cachedRoots;
         }
-        // First call or cache invalidated - compute and cache
-        return refreshRootsCache();
+        return refreshRootsCache(currentWorkspace);
     }
 
     /**
-     * Refresh the roots cache. Called from {@link #after} on the VFS thread,
-     * not the EDT, so disk I/O here is acceptable.
+     * Refresh the roots cache with the given workspace root.
+     * Called when cache is empty or workspace root has changed.
      */
-    private List<Path> refreshRootsCache() {
+    private List<Path> refreshRootsCache(String workspace) {
         List<Path> roots = new ArrayList<>(2);
 
         String home = NodeDetector.resolveHomeForFileOps();
@@ -221,11 +224,11 @@ public class AgentFileWatcher implements BulkFileListener {
             roots.add(Paths.get(home, CLAUDE_DIR, AGENTS_DIR));
         }
 
-        String workspace = workspaceRootSupplier == null ? null : workspaceRootSupplier.get();
         if (workspace != null && !workspace.isBlank()) {
             roots.add(Paths.get(workspace, CLAUDE_DIR, AGENTS_DIR));
         }
         cachedRoots = List.copyOf(roots);
+        cachedWorkspaceRoot = workspace;
         return cachedRoots;
     }
 

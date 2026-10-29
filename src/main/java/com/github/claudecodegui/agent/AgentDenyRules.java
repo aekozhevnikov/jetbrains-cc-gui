@@ -45,6 +45,10 @@ import java.util.Set;
  * names: treating {@code Agent(model:opus)} as a name would disable an agent
  * literally called "model:opus", which cannot exist.
  *
+ * <p>Additionally, the documentation states that {@code Task(name)} is an alias
+ * that still works, and denying the bare {@code Agent} tool disables every
+ * subagent. Both forms are recognized here.
+ *
  * <h2>Comparison</h2>
  *
  * <p>Names are compared <b>exactly</b>, case included. A case-insensitive
@@ -55,15 +59,19 @@ import java.util.Set;
  * trust, so the exact rule wins, and it is also what Claude Code itself does
  * with the name field.
  *
- * <h2>Read-only, and only one layer</h2>
+ * <h2>Read-only, full hierarchy</h2>
  *
- * <p>This class opens {@code ~/.claude/settings.json} and never writes to it
- * (PRD NG4: editing settings.json is out of scope). Only the user-level file is
- * consulted: project {@code .claude/settings.json},
- * {@code .claude/settings.local.json} and the platform managed-settings file
- * exist too, and an agent denied by any of them would ideally be marked too.
- * Reading them is a one-line change once the plugin is prepared to say which
- * file a rule came from, and until then under-reporting is the safe direction.
+ * <p>This class reads the full settings hierarchy and never writes to any file.
+ * The priority order (highest first, so later entries override earlier):
+ * <ol>
+ *   <li>User-level: {@code ~/.claude/settings.json}</li>
+ *   <li>Project-level: {@code {workspace}/.claude/settings.json}</li>
+ *   <li>Project local: {@code {workspace}/.claude/settings.local.json}</li>
+ *   <li>Managed settings (platform-managed, e.g., enterprise policy):
+ *       {@code /etc/claude-code/managed-settings.json} (Linux),
+ *       {@code /Library/Application Support/ClaudeCode/managed-settings.json} (macOS),
+ *       {@code C:\Program Files\ClaudeCode\managed-settings.json} (Windows)</li>
+ * </ol>
  *
  * <p>Nothing here throws. A missing file, a half-edited document, a
  * {@code permissions} node of the wrong shape — all of them are ordinary states
@@ -246,6 +254,17 @@ public final class AgentDenyRules {
      * carry entries for tools this reader knows nothing about, and a deny
      * array shared with hand-edited JSON may hold anything; skipping what is not
      * a string keeps one odd entry from discarding the whole file.
+     *
+     * <p>Recognized rule forms:
+     * <ul>
+     *   <li>{@code Agent(name)} — denies the named subagent</li>
+     *   <li>{@code Agent(*)} — denies all subagents</li>
+     *   <li>{@code Agent} (bare) — denies all subagents</li>
+     *   <li>{@code Task(name)} — alias for {@code Agent(name)}</li>
+     *   <li>{@code Task(*)} — alias for {@code Agent(*)}</li>
+     *   <li>{@code Task} (bare) — denies all subagents</li>
+     *   <li>{@code Agent(param:value)} — parameter rules, reported but not used for name matching</li>
+     * </ul>
      */
     private static DenyIndex readRules(JsonArray deny) {
         Set<String> names = new LinkedHashSet<>();
@@ -257,6 +276,11 @@ public final class AgentDenyRules {
                 continue;
             }
             String rule = element.getAsString().trim();
+            // Handle bare "Agent" or "Task" (no parentheses) = deny all
+            if ("Agent".equals(rule) || "Task".equals(rule)) {
+                denyAll = true;
+                continue;
+            }
             String value = innerValue(rule);
             if (value == null) {
                 continue;
@@ -282,7 +306,7 @@ public final class AgentDenyRules {
     }
 
     /**
-     * The trimmed content between {@code Agent(} and the closing parenthesis.
+     * The trimmed content between {@code Agent(} or {@code Task(} and the closing parenthesis.
      *
      * <p>Null for anything that is not a well-formed rule: the prefix and the
      * closing parenthesis are both required, so a bare word, a half-written
@@ -290,11 +314,12 @@ public final class AgentDenyRules {
      * empty value is rejected too — {@code Agent()} names nothing.
      */
     private static String innerValue(String rule) {
-        if (!rule.startsWith(RULE_PREFIX) || !rule.endsWith(")")
-                || rule.length() <= RULE_PREFIX.length() + 1) {
+        String prefix = rule.startsWith("Task(") ? "Task(" : RULE_PREFIX;
+        if (!rule.startsWith(prefix) || !rule.endsWith(")")
+                || rule.length() <= prefix.length() + 1) {
             return null;
         }
-        return rule.substring(RULE_PREFIX.length(), rule.length() - 1).trim();
+        return rule.substring(prefix.length(), rule.length() - 1).trim();
     }
 
     /** Copy an index with one extra problem note, leaving everything else alone. */
@@ -317,14 +342,17 @@ public final class AgentDenyRules {
     /**
      * Read deny rules from the full settings hierarchy.
      * <p>
-     * Priority order (highest first, so later entries override earlier):
+     * Priority order (lowest first, so later entries override earlier):
      * 1. User-level: ~/.claude/settings.json
      * 2. Project-level: {workspace}/.claude/settings.json
      * 3. Project local: {workspace}/.claude/settings.local.json
-     * 4. Managed settings (if available)
+     * 4. Managed settings (platform-managed, e.g., enterprise policy):
+     *    Linux: /etc/claude-code/managed-settings.json
+     *    macOS: /Library/Application Support/ClaudeCode/managed-settings.json
+     *    Windows: C:\Program Files\ClaudeCode\managed-settings.json
      * <p>
      * Rules are merged: a deny in a higher-priority file overrides an allow in a lower one.
-     * The wildcard "Agent(*)" denies all agents.
+     * The wildcard "Agent(*)" denies all agents. "Task(name)" is an alias for "Agent(name)".
      *
      * @param workspaceRoot the effective working directory, or null for user-level only
      * @return combined deny rules from all applicable settings files
@@ -346,15 +374,15 @@ public final class AgentDenyRules {
         }
 
         // 4. Managed settings (platform-managed, e.g., enterprise policy)
-        // Path varies by platform; common locations:
-        // Linux: /etc/claude/settings.json
-        // macOS: /Library/Application Support/Claude/settings.json
-        // Windows: %PROGRAMDATA%\Claude\settings.json
-        // We'll check a few common locations
+        // Per https://code.claude.com/docs/en/managed-settings
+        // Linux: /etc/claude-code/managed-settings.json
+        // macOS: /Library/Application Support/ClaudeCode/managed-settings.json
+        // Windows: C:\Program Files\ClaudeCode\managed-settings.json
+        // Note: the legacy %PROGRAMDATA%\Claude\settings.json is NOT read
         List<Path> managedPaths = List.of(
-                Paths.get("/etc/claude/settings.json"),
-                Paths.get("/Library/Application Support/Claude/settings.json"),
-                Paths.get(System.getenv("PROGRAMDATA") != null ? System.getenv("PROGRAMDATA") : "", "Claude/settings.json")
+                Paths.get("/etc/claude-code/managed-settings.json"),
+                Paths.get("/Library/Application Support/ClaudeCode/managed-settings.json"),
+                Paths.get("C:\\Program Files\\ClaudeCode\\managed-settings.json")
         );
         for (Path managedPath : managedPaths) {
             if (Files.isRegularFile(managedPath)) {

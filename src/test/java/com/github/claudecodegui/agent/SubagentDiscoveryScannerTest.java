@@ -35,9 +35,10 @@ import static org.junit.Assert.assertTrue;
  * <p>Three groups of evidence are pinned here.
  *
  * <ol>
- *   <li><b>Scan semantics (PRD R2)</b> — top-level {@code *.md} only, no
- *       recursion, reserved documentation names excluded, both scopes
- *       reported.</li>
+ *   <li><b>Scan semantics (PRD R2)</b> — recursive {@code *.md} scan (Claude Code
+ *       scans {@code .claude/agents/} recursively), reserved documentation names
+ *       excluded, both scopes reported. Hidden directories (e.g., {@code .git})
+ *       are skipped.</li>
  *   <li><b>Failure containment (PRD R4)</b> — a broken frontmatter block, an
  *       unreadable file and a missing directory must never abort the sweep or
  *       hide the healthy agents beside them.</li>
@@ -157,12 +158,11 @@ public class SubagentDiscoveryScannerTest {
     }
 
     /**
-     * R2: no recursion. A subdirectory holding a perfectly valid agent is
-     * invisible to the scan, because Claude Code does not load it either and
-     * showing it would promise something the runtime will not do.
+     * R2: recursive scan. A subdirectory holding a perfectly valid agent IS
+     * discovered, because Claude Code scans {@code .claude/agents/} recursively.
      */
     @Test
-    public void doesNotRecurseIntoSubdirectories() throws IOException {
+    public void recurseIntoSubdirectories() throws IOException {
         Path root = agentsRoot();
         write(root.resolve("code-reviewer.md"), VALID_AGENT);
         Path nested = Files.createDirectories(root.resolve("nested"));
@@ -170,7 +170,7 @@ public class SubagentDiscoveryScannerTest {
 
         ScanResult result = SubagentDiscoveryScanner.scanDirectory(root, AgentFields.SCOPE_GLOBAL);
 
-        assertEquals(List.of("code-reviewer"), names(result.loadable()));
+        assertEquals(List.of("code-reviewer", "deep-agent"), names(result.loadable()));
         // The directory entry itself is not reported as a broken agent either.
         assertTrue("unexpected warnings: " + result.warnings(), result.warnings().isEmpty());
     }

@@ -19,8 +19,11 @@ import static org.junit.Assert.assertTrue;
  * <em>negative</em> — a real agent file the watcher ignores — since that is the
  * case the feature exists to fix.
  *
+ * <p>Discovery is now recursive, so the watcher also matches files in
+ * subdirectories of the agents roots.
+ *
  * <p>Roots come from {@code NodeDetector.resolveHomeForFileOps()}, so these
- * cases are expressed as "is this path a direct child of a root" rather than
+ * cases are expressed as "is this path under a root" rather than
  * pinning the developer's home directory.
  */
 public class AgentFileWatcherRootsTest {
@@ -112,12 +115,12 @@ public class AgentFileWatcherRootsTest {
     // ------------------------------------------------------------------
 
     /**
-     * Discovery is non-recursive, so a nested document is not in the list and a
-     * change to it must not cost a rescan.
+     * Discovery is recursive, so a nested document IS in the list and a
+     * change to it SHOULD trigger a rescan.
      */
     @Test
-    public void aNestedFileIsNotAChange() {
-        assertFalse(isAgentFile("/home/u/.claude/agents/nested/deep.md", false, roots()));
+    public void aNestedFileIsAChange() {
+        assertTrue(isAgentFile("/home/u/.claude/agents/nested/deep.md", false, roots()));
     }
 
     @Test

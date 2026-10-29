@@ -581,11 +581,11 @@ public class SubagentFrontmatterParserTest {
 
     /**
      * 39 of the 152 real files that have frontmatter have no {@code name} at all.
-     * Dropping them would be exactly the silent loss PRD R4 forbids, so the file
-     * stem stands in and the substitution is announced.
+     * Per the spec, a missing {@code name} makes the file non-loadable — it is
+     * kept as a non-loadable entry so the UI can explain why it didn't load.
      */
     @Test
-    public void shouldFallBackToFileStemWhenNameMissing() throws Exception {
+    public void missingNameMakesFileNonLoadable() throws Exception {
         Path file = write("no-name-field.md", """
                 ---
                 description: Frontmatter without a name key.
@@ -597,10 +597,11 @@ public class SubagentFrontmatterParserTest {
 
         SubagentFrontmatterParser.Result result = SubagentFrontmatterParser.parse(file);
 
-        assertTrue(result.status().isLoadable());
+        assertFalse("missing name must make file non-loadable", result.status().isLoadable());
+        assertEquals(SubagentFrontmatterParser.Status.UNPARSEABLE, result.status());
         assertEquals("no-name-field", result.name());
         assertNotNull(result.warning());
-        assertTrue(result.warning(), result.warning().contains("no-name-field"));
+        assertTrue(result.warning(), result.warning().contains("name"));
     }
 
     /**
@@ -817,15 +818,16 @@ public class SubagentFrontmatterParserTest {
 
     /**
      * {@code ai-assistant.md} copied verbatim: one of the 39 real files whose
-     * frontmatter has no {@code name} at all. The stem stands in and the
-     * substitution is announced, rather than the entry being dropped.
+     * frontmatter has no {@code name} at all. Per the spec, this makes the file
+     * non-loadable — it is kept as a non-loadable entry with a warning.
      */
     @Test
-    public void shouldParseRealAiAssistantFixtureFallingBackToStem() {
+    public void realAiAssistantFixtureIsNonLoadableDueToMissingName() {
         SubagentFrontmatterParser.Result result = SubagentFrontmatterParser.parse(
                 fixture("ai-assistant.md"));
 
-        assertTrue(result.status().isLoadable());
+        assertFalse("missing name must make file non-loadable", result.status().isLoadable());
+        assertEquals(SubagentFrontmatterParser.Status.UNPARSEABLE, result.status());
         assertEquals("ai-assistant", result.name());
         assertNotNull("a substituted name must be announced", result.warning());
         // The skill/command-only keys come through untouched.

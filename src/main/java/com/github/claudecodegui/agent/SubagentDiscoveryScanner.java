@@ -52,12 +52,19 @@ import java.util.Set;
  *
  * <p>Recursive {@code *.md} scan — Claude Code scans {@code .claude/agents/} and
  * {@code ~/.claude/agents/} recursively, so subfolders like {@code agents/review/}
- * or {@code agents/research/} are included. Bodies are never read: every file goes
- * through {@link SubagentFrontmatterParser#parse(Path)}, which streams and stops at
- * the closing delimiter, so a 200 KB system prompt costs the same as a 60-byte
+ * or {@code agents/research/} are included. Hidden directories (e.g., {@code .git},
+ * {@code .hg}, {@code .svn}) are skipped to avoid scanning version control
+ * metadata. Bodies are never read: every file goes through
+ * {@link SubagentFrontmatterParser#parse(Path)}, which streams and stops at the
+ * closing delimiter, so a 200 KB system prompt costs the same as a 60-byte
  * frontmatter. There is deliberately no cache, matching the skills scan; the
  * sweep is a directory listing plus a bounded read per file, and the
  * alternative is a staleness bug across two roots and a settings dialog.
+ *
+ * <p>Walk-up discovery for project agents — starting from the workspace root,
+ * the scan walks up the directory tree to the filesystem root, finding all
+ * {@code .claude/agents} directories. This matches Claude Code's behavior of
+ * discovering project agents by walking up to the repository root.
  *
  * <p>What happens to a file that is not a usable agent:
  *
@@ -72,32 +79,38 @@ import java.util.Set;
  *       skipped silently; they are layout, not errors.</li>
  * </ul>
  *
- * <h2>Symlink containment (R14)</h2>
+ * <p>Duplicate names within the same scope — when two files declare the same
+ * agent name, the first one (by sorted file name) wins and a warning is recorded.
+ * This mirrors Claude Code's behavior, which also loads only one and reports the
+ * conflict via {@code /doctor}.
  *
- * <p>Every candidate is resolved with {@link Path#toRealPath()} and the result
- * must start with the <em>resolved</em> root. Resolving both sides is what makes
- * the check work: a root reached through a symlink (macOS {@code /tmp} is one)
- * still matches its own children, while a link that points out of the tree
- * resolves to a path that does not begin with the root and is refused before a
- * single byte is read. The entry directory listing cannot otherwise be
- * confused, because a path handed to us by a directory listing can only leave
- * that directory through a link.
+ * <h2>Symlink handling and containment (R14)</h2>
+ *
+ * <p>The walk uses {@link FileVisitOption#FOLLOW_LINKS}, so symlinked agent files
+ * and subdirectories are discovered. Every candidate is then resolved with
+ * {@link Path#toRealPath()} and the result must start with the <em>resolved</em>
+ * root. Resolving both sides is what makes the check work: a root reached through
+ * a symlink (macOS {@code /tmp} is one) still matches its own children, while a
+ * link that points out of the tree resolves to a path that does not begin with
+ * the root and is refused before a single byte is read.
  *
  * <p>Two details fall out of doing it this way. The <em>real</em> path, not the
  * link, is what gets parsed and reported — so a link pointing at a file already
  * inside the root collapses onto that file instead of producing a second agent
  * for the same bytes, and the path handed to the UI is always a file the scan
- * actually read. And a link that <em>does</em> stay inside the root is allowed:
+ * actually read. A link that <em>does</em> stay inside the root is allowed:
  * it is an alias for a file the user already chose to expose, not an escape.
+ * A link that escapes the root is reported as a warning ({@code ESCAPES_ROOT})
+ * and skipped.
  *
  * <p>The root itself gets the same treatment one level up. If
  * {@code ~/.claude/agents} is itself a link pointing at {@code ~/.ssh}, then
  * the resolved root is that directory and every containment check below it
  * passes — correctly, since those files really are inside the root. The scan
  * still completes and the agents are still listed; what changes is that a
- * warning is recorded, because the user asked to see what is in
- * {@code ~/.claude/agents} and is owed to know it is not there. The
- * comparison is against the <em>resolved</em> Claude directory, so a user who
+ * warning is recorded ({@code ROOT_OUTSIDE_CLAUDE_DIR}), because the user asked
+ * to see what is in {@code ~/.claude/agents} and is owed to know it is not there.
+ * The comparison is against the <em>resolved</em> Claude directory, so a user who
  * symlinks {@code ~/.claude} itself is not warned about their own layout.
  *
  * <p>The check is inherently check-then-open, and a determined local attacker
@@ -312,14 +325,22 @@ public final class SubagentDiscoveryScanner {
      * @return the roots to scan, global first
      */
     static List<ScanRoot> roots(String homeDir, String workspaceRoot) {
-        List<ScanRoot> roots = new ArrayList<>(2);
+        List<ScanRoot> roots = new ArrayList<>(4);
         if (homeDir != null && !homeDir.isBlank()) {
             roots.add(new ScanRoot(AgentFields.SCOPE_GLOBAL,
                     Paths.get(homeDir, CLAUDE_DIR, AGENTS_DIR)));
         }
         if (workspaceRoot != null && !workspaceRoot.isBlank()) {
-            roots.add(new ScanRoot(AgentFields.SCOPE_LOCAL,
-                    Paths.get(workspaceRoot, CLAUDE_DIR, AGENTS_DIR)));
+            // Walk-up discovery: find all .claude/agents directories from
+            // workspace root up to filesystem root (per Claude Code spec)
+            Path current = Paths.get(workspaceRoot);
+            while (current != null) {
+                Path agentsDir = current.resolve(CLAUDE_DIR).resolve(AGENTS_DIR);
+                if (Files.isDirectory(agentsDir)) {
+                    roots.add(new ScanRoot(AgentFields.SCOPE_LOCAL, agentsDir));
+                }
+                current = current.getParent();
+            }
         }
         return roots;
     }
@@ -438,6 +459,8 @@ public final class SubagentDiscoveryScanner {
         // Real paths already handled, so a symlink alias inside the root
         // collapses onto the file it points at rather than duplicating it.
         Set<Path> read = new HashSet<>();
+        // Track names within this scope to detect duplicates
+        Set<String> seenNames = new HashSet<>();
 
         for (Path candidate : candidates) {
             String fileName = candidate.getFileName().toString();
@@ -499,7 +522,22 @@ public final class SubagentDiscoveryScanner {
                 continue;
             }
 
-            entries.addAll(read(real, fileName, scope, warnings));
+            List<DiscoveredAgent> newEntries = read(real, fileName, scope, warnings);
+            for (DiscoveredAgent entry : newEntries) {
+                String entryName = entry.name();
+                if (seenNames.contains(entryName)) {
+                    String message = "duplicate agent name \"" + entryName
+                            + "\" in the " + scope + " root (first one wins); "
+                            + "Claude Code also loads only one and reports it via /doctor";
+                    warnings.add(new ScanWarning(scope, entry.path(), fileName,
+                            WarningReason.UNPARSEABLE, message));
+                    LOG.warn("[AgentDiscovery] " + logName + " in the " + scope
+                            + " root: " + message);
+                } else {
+                    seenNames.add(entryName);
+                    entries.add(entry);
+                }
+            }
         }
 
         LOG.info("[AgentDiscovery] " + scope + " root: " + entries.size() + " agent(s), "
@@ -592,27 +630,43 @@ public final class SubagentDiscoveryScanner {
      * <p>Sorted so two passes over an unchanged directory report the same
      * order — the merge and precedence steps downstream should not depend on
      * the filesystem's whim.
+     *
+     * <p>Follows symlinks so that symlinked agent files and subdirectories are
+     * discovered. The containment check in {@link #scanDirectory} uses
+     * {@code toRealPath()} on both sides, so a link that escapes the root is
+     * caught there, not here.
      */
     private static List<Path> listRecursive(Path root) {
         List<Path> candidates = new ArrayList<>();
         try {
-            Files.walkFileTree(root, new SimpleFileVisitor<Path>() {
-                @Override
-                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                    if (attrs.isRegularFile()) {
-                        candidates.add(file);
-                    }
-                    return FileVisitResult.CONTINUE;
-                }
+            Files.walkFileTree(root, java.util.EnumSet.of(FileVisitOption.FOLLOW_LINKS), Integer.MAX_VALUE,
+                    new SimpleFileVisitor<Path>() {
+                        @Override
+                        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                            // Skip hidden directories (e.g., .git, .hg, .svn)
+                            Path dirName = dir.getFileName();
+                            if (dirName != null && dirName.toString().startsWith(".")) {
+                                return FileVisitResult.SKIP_SUBTREE;
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
 
-                @Override
-                public FileVisitResult visitFileFailed(Path file, IOException exc) {
-                    // Don't fail the whole walk if one file is unreadable
-                    LOG.debug("[AgentDiscovery] Cannot access " + LogSanitizer.sanitize(file.toString())
-                            + ": " + exc.getClass().getSimpleName());
-                    return FileVisitResult.CONTINUE;
-                }
-            });
+                        @Override
+                        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                            if (attrs.isRegularFile() || attrs.isSymbolicLink()) {
+                                candidates.add(file);
+                            }
+                            return FileVisitResult.CONTINUE;
+                        }
+
+                        @Override
+                        public FileVisitResult visitFileFailed(Path file, IOException exc) {
+                            // Don't fail the whole walk if one file is unreadable
+                            LOG.debug("[AgentDiscovery] Cannot access " + LogSanitizer.sanitize(file.toString())
+                                    + ": " + exc.getClass().getSimpleName());
+                            return FileVisitResult.CONTINUE;
+                        }
+                    });
         } catch (IOException e) {
             LOG.warn("[AgentDiscovery] Cannot walk agents directory " + LogSanitizer.sanitize(root.toString())
                     + ": " + e.getClass().getSimpleName());

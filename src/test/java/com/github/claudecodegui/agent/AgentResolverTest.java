@@ -69,18 +69,21 @@ public class AgentResolverTest {
      * AC2: the project definition shadows the global one. The entry that comes
      * back is the project file, whole — its own id, its own scope, its own
      * fields.
+     *
+     * <p>This test now uses resolveSubagents() which only resolves discovered
+     * agents (global/local), not store agents. Store agents are resolved
+     * separately via resolveStoreAgents().
      */
     @Test
-    public void localBeatsGlobalAndStoreForTheSameName() throws IOException {
+    public void localBeatsGlobalForTheSameName() throws IOException {
         Path globalRoot = agentsRoot("global-root");
         Path localRoot = agentsRoot("local-root");
         write(globalRoot.resolve("code-reviewer.md"), AGENT_FILE.replace("{name}", "code-reviewer"));
         write(localRoot.resolve("code-reviewer.md"), AGENT_FILE.replace("{name}", "code-reviewer"));
 
-        Resolution resolution = AgentResolver.resolve(
-                List.of(storeAgent("code-reviewer", "an imported copy")),
-                scan(globalRoot, AgentFields.SCOPE_GLOBAL, localRoot, AgentFields.SCOPE_LOCAL),
-                DenyIndex.empty(), AgentResolver.ALL_SCOPES);
+        // Use resolveSubagents for discovered agents only (no store agents)
+        ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL, localRoot, AgentFields.SCOPE_LOCAL);
+        Resolution resolution = AgentResolver.resolveSubagents(scan, DenyIndex.empty(), AgentResolver.ALL_SCOPES);
 
         assertEquals(List.of("code-reviewer"), names(resolution));
         JsonObject winner = resolution.agents().get(0);
@@ -92,8 +95,7 @@ public class AgentResolverTest {
 
     /**
      * The load-bearing part of R9: a loser never contributes a field. Here the
-     * store copy carries a {@code prompt} and a {@code createdAt}, the global
-     * file carries a {@code description}; neither survives in the winner.
+     * global file carries a {@code description}; it doesn't leak into the local winner.
      *
      * <p>Field-level merging was rejected because a subagent is a single
      * definition with a single contract. A half-merged agent would advertise a
@@ -107,38 +109,33 @@ public class AgentResolverTest {
     public void theWinnerIsTakenWholeAndIsNotCompletedFromTheLosers() throws IOException {
         Path globalRoot = agentsRoot("g");
         Path localRoot = agentsRoot("l");
+        write(globalRoot.resolve("reviewer.md"), AGENT_FILE.replace("{name}", "reviewer"));
         write(localRoot.resolve("reviewer.md"), AGENT_FILE.replace("{name}", "reviewer"));
 
-        Resolution resolution = AgentResolver.resolve(
-                List.of(storeAgent("reviewer", "an imported copy")),
-                scan(globalRoot, AgentFields.SCOPE_GLOBAL, localRoot, AgentFields.SCOPE_LOCAL),
-                DenyIndex.empty(), AgentResolver.ALL_SCOPES);
+        // Use resolveSubagents for discovered agents only (no store agents)
+        ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL, localRoot, AgentFields.SCOPE_LOCAL);
+        Resolution resolution = AgentResolver.resolveSubagents(scan, DenyIndex.empty(), AgentResolver.ALL_SCOPES);
 
         JsonObject winner = resolution.agents().get(0);
         assertEquals(1, resolution.agents().size());
         assertEquals(AgentFields.SCOPE_LOCAL, winner.get("scope").getAsString());
-        assertFalse("no field may come from the store copy",
-                winner.has("prompt"));
-        assertFalse(winner.has("createdAt"));
         assertEquals("The reviewer agent", winner.get("description").getAsString());
     }
 
-    /** The global file shadows the store when no project file exists. */
+    /** The global file is returned when only global exists (no local override). */
     @Test
-    public void globalBeatsStore() throws IOException {
+    public void globalFileReturnedWhenNoLocalOverride() throws IOException {
         Path globalRoot = agentsRoot("g");
         write(globalRoot.resolve("reviewer.md"), AGENT_FILE.replace("{name}", "reviewer"));
 
-        Resolution resolution = AgentResolver.resolve(
-                List.of(storeAgent("reviewer", "an imported copy")),
-                scan(globalRoot, AgentFields.SCOPE_GLOBAL),
-                DenyIndex.empty(), AgentResolver.ALL_SCOPES);
+        // Use resolveSubagents for discovered agents only (no store agents)
+        ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL);
+        Resolution resolution = AgentResolver.resolveSubagents(scan, DenyIndex.empty(), AgentResolver.ALL_SCOPES);
 
         assertEquals(1, resolution.agents().size());
         JsonObject winner = resolution.agents().get(0);
         assertEquals(AgentFields.SCOPE_GLOBAL, winner.get("scope").getAsString());
         assertEquals("global-reviewer", winner.get("id").getAsString());
-        assertFalse(winner.has("prompt"));
     }
 
     /** A store entry is the last resort, and it keeps the shape the store gave it. */
@@ -317,22 +314,24 @@ public class AgentResolverTest {
         ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL,
                 localRoot, AgentFields.SCOPE_LOCAL);
 
+        // Store agents resolved separately
         assertEquals(List.of("s-one"),
-                names(AgentResolver.resolve(store, scan, DenyIndex.empty(), List.of("store"))));
+                names(AgentResolver.resolveStoreAgents(store, List.of("store"))));
+        // Subagents resolved separately
         assertEquals(List.of("g-one"),
-                names(AgentResolver.resolve(store, scan, DenyIndex.empty(), List.of("global"))));
+                names(AgentResolver.resolveSubagents(scan, DenyIndex.empty(), List.of("global"))));
         assertEquals(List.of("g-one", "l-one"),
-                names(AgentResolver.resolve(store, scan, DenyIndex.empty(),
+                names(AgentResolver.resolveSubagents(scan, DenyIndex.empty(),
                         List.of("global", "local"))));
     }
 
     /**
-     * An unknown scope reaches {@code resolve} and is rejected there, not
-     * dropped.
+     * An unknown scope reaches {@code resolveSubagents} or {@code resolveStoreAgents}
+     * and is rejected there, not dropped.
      *
      * <p>The parser already rejects one in a request body, so this is the
-     * second door to the same room: {@code resolve} takes the scope list
-     * directly and is public, so a caller need not go through the parser at
+     * second door to the same room: these methods take the scope list
+     * directly and are public, so a caller need not go through the parser at
      * all. A silent filter would answer a caller that named two scopes with
      * the single one that parsed — a result indistinguishable from "your
      * filter matched nothing", which is the same silence the parser was fixed
@@ -345,48 +344,50 @@ public class AgentResolverTest {
         List<JsonObject> store = List.of(storeAgent("s-one", "a prompt"));
         ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL);
 
-        // One valid scope, one this build does not know.
+        // Test resolveSubagents rejects unknown scope
         IllegalArgumentException unknown = assertThrows(IllegalArgumentException.class,
-                () -> AgentResolver.resolve(store, scan, DenyIndex.empty(),
+                () -> AgentResolver.resolveSubagents(scan, DenyIndex.empty(),
                         List.of(AgentFields.SCOPE_GLOBAL, "future")));
         assertTrue("the message must name the offending scope, was: " + unknown.getMessage(),
                 unknown.getMessage().contains("future"));
         assertTrue("the message must name the supported scopes, was: " + unknown.getMessage(),
                 unknown.getMessage().contains(AgentFields.SCOPE_GLOBAL));
 
-        // The order does not matter, and neither does the count: a lone unknown
-        // scope is rejected just the same.
+        // Test resolveStoreAgents rejects unknown scope
         assertThrows(IllegalArgumentException.class,
-                () -> AgentResolver.resolve(store, scan, DenyIndex.empty(),
-                        List.of("future", AgentFields.SCOPE_GLOBAL)));
+                () -> AgentResolver.resolveStoreAgents(store, List.of("future")));
         assertThrows(IllegalArgumentException.class,
-                () -> AgentResolver.resolve(store, scan, DenyIndex.empty(), List.of("future")));
+                () -> AgentResolver.resolveStoreAgents(store, List.of("future", AgentFields.SCOPE_STORE)));
 
         // A fully valid list is unaffected, so the check cannot regress into
         // rejecting good input.
-        assertEquals(List.of("g-one", "s-one"),
-                names(AgentResolver.resolve(store, scan, DenyIndex.empty(),
-                        List.of(AgentFields.SCOPE_GLOBAL, AgentFields.SCOPE_STORE))));
+        assertEquals(List.of("g-one"),
+                names(AgentResolver.resolveSubagents(scan, DenyIndex.empty(),
+                        List.of(AgentFields.SCOPE_GLOBAL))));
+        assertEquals(List.of("s-one"),
+                names(AgentResolver.resolveStoreAgents(store, List.of(AgentFields.SCOPE_STORE))));
     }
 
     /**
      * The scope filter runs <em>after</em> precedence, not before. Filtering
-     * first would let a shadowed store entry reappear the moment the client
-     * asked for "store" only — the same agent would be visible under two
-     * different requests, with two different bodies.
+     * first would let a shadowed global entry reappear the moment the client
+     * asked for "global" only.
      */
     @Test
     public void theScopeFilterDoesNotResurrectAShadowedEntry() throws IOException {
         Path globalRoot = agentsRoot("g");
+        Path localRoot = agentsRoot("l");
         write(globalRoot.resolve("reviewer.md"), AGENT_FILE.replace("{name}", "reviewer"));
+        write(localRoot.resolve("reviewer.md"), AGENT_FILE.replace("{name}", "reviewer"));
 
-        Resolution storeOnly = AgentResolver.resolve(
-                List.of(storeAgent("reviewer", "an imported copy")),
-                scan(globalRoot, AgentFields.SCOPE_GLOBAL),
-                DenyIndex.empty(), List.of("store"));
+        // Use resolveSubagents for discovered agents only
+        ScanResult scan = scan(globalRoot, AgentFields.SCOPE_GLOBAL, localRoot, AgentFields.SCOPE_LOCAL);
 
-        assertTrue("the global file shadows the store entry, so no store agent remains",
-                storeOnly.agents().isEmpty());
+        // Request only global scope - should not resurrect the shadowed global
+        Resolution globalOnly = AgentResolver.resolveSubagents(scan, DenyIndex.empty(), List.of("global"));
+
+        assertTrue("the local file shadows the global entry, so no global agent remains",
+                globalOnly.agents().isEmpty());
     }
 
     // ==================================================================
