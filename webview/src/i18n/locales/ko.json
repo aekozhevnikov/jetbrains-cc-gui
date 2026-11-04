@@ -398,6 +398,12 @@
         "enabled": "활성화",
         "disabled": "비활성화",
         "hint": "비활성화하면 메시지가 있는 세션에서 새로 만들기를 선택할 때 확인 대화 상자 없이 바로 새 세션을 만듭니다."
+      },
+      "autoConvertSessionsOnExit": {
+        "label": "IDE 종료 시 세션을 CLI로 자동 변환",
+        "enabled": "활성화",
+        "disabled": "비활성화",
+        "hint": "플러그인이 SDK를 통해 만든 세션은 entrypoint가 sdk-cli라서 Claude Code CLI의 /resume 목록에 표시되지 않습니다. 활성화하면 IDE를 닫을 때 자동으로 변환됩니다."
       }
     },
     "providers": "제공자 관리",

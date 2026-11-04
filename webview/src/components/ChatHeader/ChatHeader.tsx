@@ -29,6 +29,10 @@ export interface ChatHeaderProps {
    * explanatory hint instead; `false`/`undefined` renders nothing.
    */
   convertHintVisible?: boolean;
+  /**
+   * Callback fired when the user dismisses the convert hint.
+   */
+  onDismissConvertHint?: () => void;
 }
 
 export function ChatHeader({
@@ -44,6 +48,7 @@ export function ChatHeader({
   onTitleChange,
   titleEditable = false,
   convertHintVisible = false,
+  onDismissConvertHint,
 }: ChatHeaderProps): React.ReactElement | null {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -152,6 +157,16 @@ export function ChatHeader({
                 {t('history.convertActiveHint', {
                   defaultValue: 'Convert to CLI after ending the session',
                 })}
+                {onDismissConvertHint && (
+                  <button
+                    className="session-convert-hint-dismiss"
+                    onClick={onDismissConvertHint}
+                    aria-label={t('common.close', { defaultValue: 'Close' })}
+                    title={t('common.close', { defaultValue: 'Close' })}
+                  >
+                    <span className="codicon codicon-close" />
+                  </button>
+                )}
               </span>
             )}
           </div>

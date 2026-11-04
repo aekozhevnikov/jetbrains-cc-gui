@@ -398,6 +398,12 @@
         "enabled": "Habilitado",
         "disabled": "Deshabilitado",
         "hint": "Cuando está deshabilitado, crear una nueva sesión en una conversación con mensajes existentes omitirá el cuadro de confirmación."
+      },
+      "autoConvertSessionsOnExit": {
+        "label": "Convertir sesiones a CLI al salir",
+        "enabled": "Activado",
+        "disabled": "Desactivado",
+        "hint": "Las sesiones creadas por el plugin mediante el SDK no aparecen en la lista /resume de Claude Code CLI porque su entrypoint es sdk-cli. Si se activa, se convierten automáticamente al cerrar el IDE."
       }
     },
     "providers": "Gestión de proveedores",
