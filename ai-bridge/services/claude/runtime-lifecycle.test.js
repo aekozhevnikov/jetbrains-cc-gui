@@ -831,3 +831,68 @@ test('applyPermissionModeToRuntime ignores a transition completed after disposal
 });
 
 console.log('\n✅ All TurnSink tests defined. Run with: node runtime-lifecycle.test.js');
+
+// ============================================================================
+// REGRESSION TESTS for PR #2056 fixes
+// ============================================================================
+
+test('buildRuntimeSignature includes envFingerprint for env changes', () => {
+  const baseOptions = { cwd: '/w', model: 'sonnet' };
+
+  // Same options but different env should produce different signatures
+  const options1 = { ...baseOptions, env: { API_KEY: 'key1' } };
+  const options2 = { ...baseOptions, env: { API_KEY: 'key2' } };
+
+  const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
+  const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
+
+  // Different env should produce different signatures
+  assert.notEqual(sig1, sig2);
+  assert.match(sig1, /"envFingerprint"/);
+  assert.match(sig2, /"envFingerprint"/);
+});
+
+test('buildRuntimeSignature includes mcpFingerprint for MCP config changes', () => {
+  const baseOptions = { cwd: '/w', model: 'sonnet' };
+
+  const options1 = { ...baseOptions, mcpServers: { server1: { command: 'node' } } };
+  const options2 = { ...baseOptions, mcpServers: { server2: { command: 'python' } } };
+
+  const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
+  const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
+
+  assert.notEqual(sig1, sig2);
+  assert.match(sig1, /"mcpFingerprint"/);
+  assert.match(sig2, /"mcpFingerprint"/);
+});
+
+test('buildRuntimeSignature includes settingsFingerprint for settings changes', () => {
+  const baseOptions = { cwd: '/w', model: 'sonnet' };
+
+  const options1 = { ...baseOptions, settings: { env: { VAR: 'val1' } } };
+  const options2 = { ...baseOptions, settings: { env: { VAR: 'val2' } } };
+
+  const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
+  const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
+
+  assert.notEqual(sig1, sig2);
+  assert.match(sig1, /"settingsFingerprint"/);
+  assert.match(sig2, /"settingsFingerprint"/);
+});
+
+test('buildRuntimeSignature stable for identical env/MCP/settings', () => {
+  const options = {
+    cwd: '/w',
+    model: 'sonnet',
+    env: { API_KEY: 'key1' },
+    mcpServers: { s1: { command: 'node' } },
+    settings: { env: { VAR: 'val' } }
+  };
+
+  const sig1 = buildRuntimeSignature(options, '', true, 'ep', 'model');
+  const sig2 = buildRuntimeSignature(options, '', true, 'ep', 'model');
+
+  assert.equal(sig1, sig2);
+});
+
+console.log('\n✅ All TurnSink tests defined. Run with: node runtime-lifecycle.test.js');

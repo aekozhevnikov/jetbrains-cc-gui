@@ -3,7 +3,7 @@
  * Supports both Claude and Codex modes
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ToastContainer } from '../Toast';
 
@@ -121,6 +121,12 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
     onLog: addLog,
   });
 
+  // Create a ref that stays in sync with servers for useToolsUpdate
+  const serversRef = useRef(servers);
+  useEffect(() => {
+    serversRef.current = servers;
+  }, [servers]);
+
   // Use server management hook
   const {
     serverRefreshStates,
@@ -146,6 +152,7 @@ function McpProviderPanel({ currentProvider }: { currentProvider: McpProvider })
     cacheKeys,
     setServerTools,
     onLog: addLog,
+    serversRef: serversRef,
   });
 
   // Codex mutations report success only after config.toml was written.

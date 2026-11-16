@@ -68,6 +68,12 @@ export interface McpServer {
   docs?: string;
   /** Whether enabled (legacy format compatibility) */
   enabled?: boolean;
+  /** Source of the server configuration: 'global' or 'project' */
+  source?: 'global' | 'project';
+  /** Whether this server conflicts with another */
+  conflicting?: boolean;
+  /** ID of the server this server conflicts with */
+  conflictingWith?: string;
   /** Allow extension fields */
   [key: string]: any;
 }

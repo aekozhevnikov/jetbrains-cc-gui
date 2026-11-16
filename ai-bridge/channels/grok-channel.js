@@ -29,6 +29,7 @@ export async function handleGrokCommand(command, args, stdinData) {
           agentPrompt: stdinData.agentPrompt || '',
           streaming: stdinData.streaming !== undefined ? stdinData.streaming : true,
           reasoningEffort: stdinData.reasoningEffort || '',
+          envFile: stdinData.envFile ?? null,
         };
         await grokSendMessage(options);
       } else {

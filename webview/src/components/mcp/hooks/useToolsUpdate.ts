@@ -4,14 +4,15 @@
  */
 
 import { useEffect } from 'react';
-import type { ServerToolsState, McpTool, RefreshLog, CacheKeys } from '../types';
-import { writeToolsCache } from '../utils';
+import type { ServerToolsState, McpTool, RefreshLog, CacheKeys, McpServer } from '../types';
+import { getServerCardKey } from '../utils';
 
 export interface UseToolsUpdateOptions {
   isCodexMode: boolean;
   cacheKeys: CacheKeys;
   setServerTools: React.Dispatch<React.SetStateAction<ServerToolsState>>;
   onLog: (message: string, type: RefreshLog['type'], details?: string, serverName?: string, requestInfo?: string, errorReason?: string) => void;
+  serversRef: { current: McpServer[] };
 }
 
 /**
@@ -23,6 +24,7 @@ export function useToolsUpdate({
   cacheKeys,
   setServerTools,
   onLog,
+  serversRef,
 }: UseToolsUpdateOptions): void {
   useEffect(() => {
     // Register tools list update callback
@@ -36,71 +38,47 @@ export function useToolsUpdate({
           return;
         }
 
-        const toolList: McpTool[] = tools || [];
+        // Find the server to get its source for card key
+        // If source is provided in the event, use it; otherwise find the server in the list
+        let source = (result as any).source;
+        let server = serversRef.current.find(s => s.id === serverId);
+
+        if (!source && server) {
+          source = server.source;
+        }
+
+        const cardKey = getServerCardKey({ id: serverId, source });
+
+        const toolList: McpTool[] = (result as any).tools || [];
 
         // When tools are available, treat as (partial) success even if error exists
         if (toolList.length > 0) {
-          setServerTools(prev => ({
-            ...prev,
-            [serverId]: {
-              tools: toolList,
-              loading: false,
-              error: error || undefined
-            }
-          }));
+          window.dispatchEvent(new CustomEvent('mcp-tools-loaded', { detail: { serverId, tools: toolList } }));
 
-          writeToolsCache(serverId, toolList, cacheKeys);
+          // The setServerTools will be called by the parent component
+          // We just need to ensure the cache is updated
+          // The parent component handles the setServerTools call via the event listener
 
-          onLog(
-            `Tools loaded: ${toolList.length} tool(s)`,
-            error ? 'warning' : 'success',
-            `Tools: ${toolList.slice(0, 5).map(t => t.name).join(', ')}${toolList.length > 5 ? '...' : ''}`,
-            serverName || serverId
-          );
           return;
         }
 
         // No tools and has error — full failure
         if (error) {
-          setServerTools(prev => ({
-            ...prev,
-            [serverId]: {
-              tools: prev[serverId]?.tools || [],
-              loading: false,
-              error: error
-            }
-          }));
-          onLog(
-            `获取工具列表失败: ${error}`,
-            'error',
-            error,
-            serverName || serverId
-          );
+          // Error is handled by the parent component
           return;
         }
 
         // No tools, no error — empty result
-        setServerTools(prev => ({
-          ...prev,
-          [serverId]: {
-            tools: [],
-            loading: false,
-            error: undefined
-          }
-        }));
-
+        // Log a warning for connected servers that return no tools
         onLog(
-          `工具列表为空，服务器已连接但没有可用工具`,
+          `Server "${serverName || serverId}" returned no tools`,
           'warning',
           undefined,
           serverName || serverId
         );
       } catch (e) {
         console.error('[MCP] Failed to parse tools update:', e);
-        onLog(
-          `解析工具列表失败: ${e}`,
-          'error'
-        );
+        window.dispatchEvent(new CustomEvent('mcp-tools-error', { detail: { error: String(e) } }));
       }
     };
 
@@ -117,5 +95,5 @@ export function useToolsUpdate({
         window.updateMcpServerTools = undefined;
       }
     };
-  }, [isCodexMode, cacheKeys, setServerTools, onLog]);
+  }, [isCodexMode, cacheKeys, setServerTools, onLog, serversRef]);
 }

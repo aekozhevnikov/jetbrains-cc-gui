@@ -61,11 +61,13 @@ describe('useToolsUpdate empty tool result', () => {
   it('logs a connected server with no tools as a warning', () => {
     const setServerTools = vi.fn() as unknown as Dispatch<SetStateAction<ServerToolsState>>;
     const onLog = vi.fn();
+    const serversRef = { current: [{ id: 'empty-server', name: 'Empty server', source: 'global' }] };
     const hook = renderHook(() => useToolsUpdate({
       isCodexMode: false,
       cacheKeys,
       setServerTools,
       onLog,
+      serversRef,
     }));
 
     act(() => {

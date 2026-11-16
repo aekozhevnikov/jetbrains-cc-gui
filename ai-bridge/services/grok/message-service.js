@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { buildGrokEnv, buildErrorPayload, resolveEffectiveGrokAuth } from './grok-utils.js';
 import { runAcpTurn } from './grok-acp-client.js';
 import { GrokEventNormalizer } from './grok-event-normalizer.js';
+import { loadEnvFile, applyEnvFileVars } from '../utils/envLoader.js';
 
 /**
  * @param {object} options Claude-shaped options bag (preferred) OR legacy positional via channel
@@ -60,6 +61,7 @@ export async function sendMessage(
     agentPrompt = '',
     streaming = true,
     reasoningEffort = '',
+    envFile = null,
   } = opts;
 
   const normalizer = new GrokEventNormalizer({
@@ -73,6 +75,25 @@ export async function sendMessage(
   let streamOpen = false;
 
   try {
+    // Load env file FIRST so that XAI_API_KEY and GROK_AUTH_METHOD from .env
+    // are available for auth resolution. This must happen before resolveEffectiveGrokAuth.
+    let envVars = {};
+    if (envFile) {
+      // Security: validate envFile path against project cwd to prevent path
+      // traversal. Always provide a base directory — if both workCwd and cwd
+      // are empty/null, fall back to the project path env vars. If none of them
+      // yield a directory, loadEnvFile fails closed rather than reading an
+      // arbitrary *.env* path (see validateEnvFilePath).
+      const baseDir = (workCwd && workCwd.trim() !== '')
+        ? workCwd
+        : (process.env.IDEA_PROJECT_PATH || process.env.PROJECT_PATH || null);
+      envVars = await loadEnvFile(envFile, baseDir);
+      // Shared apply site: "only if unset" + the env-file denylist (incl. PATH, CLAUDE_CODE_PATH, GROK_CLI_PATH).
+      applyEnvFileVars(envVars);
+    } else {
+      console.error('[DEBUG] grok message-service: envFile is null/empty/undefined — no env file loaded');
+    }
+
     const preferredAuth = authMethodOpt || process.env.GROK_AUTH_METHOD || '';
     // OAuth empty → ~/.grok/config.toml api_key (or plugin key). Resolved once here;
     // buildGrokEnv(resolveOptions=false) avoids double work / double log.

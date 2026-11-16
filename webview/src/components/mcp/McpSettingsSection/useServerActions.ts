@@ -17,6 +17,112 @@ export interface UseServerActionsOptions {
   t: (key: string, options?: Record<string, unknown>) => string;
 }
 
+/** Replacement written in place of a redacted secret. */
+const REDACTED = '***';
+
+/**
+ * Names that mark a flag, an env var, a header or a query parameter as secret-bearing.
+ * Deliberately broad: over-masking a harmless value only costs readability in a
+ * config snippet the user is about to review, while a missed secret ends up pasted
+ * into a chat window, a bug report or a public gist.
+ */
+const SENSITIVE_KEY_PATTERN = /(api[-_]?key|access[-_]?key|private[-_]?key|secret|token|password|passwd|passphrase|auth|credential|signature|^sig$|session)/i;
+
+/** Value shapes that are a secret no matter which key carries them. */
+const SECRET_VALUE_PATTERNS: RegExp[] = [
+  /^sk-[A-Za-z0-9_-]{8,}$/,
+  /^gh[pousr]_[A-Za-z0-9]{16,}$/,
+  /^xox[abopsr]-[A-Za-z0-9-]{8,}$/,
+  /^AKIA[0-9A-Z]{12,}$/,
+  /^[A-Fa-f0-9]{32,}$/,
+  /^[A-Za-z0-9_-]{40,}$/,
+];
+
+function looksLikeSecretValue(value: string): boolean {
+  return SECRET_VALUE_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/**
+ * Redact secrets passed as command-line arguments.
+ * A value is redacted when it follows a secret-looking flag ("--api-key sk-…") or when
+ * it looks like a credential on its own.
+ */
+function redactArgs(args: unknown[]): { args: string[]; redacted: boolean } {
+  const out: string[] = [];
+  let redacted = false;
+  let maskNext = false;
+
+  for (const raw of args) {
+    const value = typeof raw === 'string' ? raw : String(raw);
+    if (maskNext) {
+      out.push(REDACTED);
+      redacted = true;
+      maskNext = false;
+    } else if (value.startsWith('-') && value.includes('=')) {
+      // Handle --key=value format FIRST, before general flag check
+      const eqIdx = value.indexOf('=');
+      const flag = value.substring(0, eqIdx);
+      const flagValue = value.substring(eqIdx + 1);
+      if (SENSITIVE_KEY_PATTERN.test(flag.replace(/^--?/, '')) || looksLikeSecretValue(flagValue)) {
+        out.push(flag + '=' + REDACTED);
+        redacted = true;
+      } else {
+        out.push(value);
+      }
+    } else if (value.startsWith('-') && SENSITIVE_KEY_PATTERN.test(value.replace(/^--?/, ''))) {
+      out.push(value);
+      maskNext = true;
+    } else if (looksLikeSecretValue(value)) {
+      out.push(REDACTED);
+      redacted = true;
+    } else {
+      out.push(value);
+    }
+  }
+
+  return { args: out, redacted };
+}
+
+/**
+ * Redact secrets embedded in a server URL: credentials in the authority
+ * ("https://user:pass@host") and secret-looking query parameters
+ * ("https://host/mcp?token=…"). A non-absolute URL is returned untouched.
+ */
+function redactUrl(rawUrl: string): { url: string; redacted: boolean } {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { url: rawUrl, redacted: false };
+  }
+
+  let redacted = false;
+  if (parsed.password) {
+    parsed.password = REDACTED;
+    redacted = true;
+  }
+
+  // Collect the keys first: mutating searchParams while iterating it is fragile.
+  for (const key of Array.from(parsed.searchParams.keys())) {
+    const value = parsed.searchParams.get(key) ?? '';
+    if (SENSITIVE_KEY_PATTERN.test(key) || looksLikeSecretValue(value)) {
+      parsed.searchParams.set(key, REDACTED);
+      redacted = true;
+    }
+  }
+
+  return { url: parsed.toString(), redacted };
+}
+
+export interface UseServerActionsOptions {
+  messagePrefix: string;
+  isCodexMode: boolean;
+  addToast: (message: string, type?: ToastMessage['type']) => void;
+  loadServers: () => void;
+  closeDropdown: () => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
+}
+
 export function useServerActions({
   messagePrefix,
   isCodexMode,
@@ -51,7 +157,12 @@ export function useServerActions({
   // Confirm deletion
   const confirmDelete = useCallback(() => {
     if (deletingServer) {
-      sendToJava(`delete_${messagePrefix}mcp_server`, { id: deletingServer.id });
+      // Include scope to ensure we delete from the correct config (global vs project)
+      const scope = deletingServer.source === 'project' ? 'project' : 'global';
+      sendToJava(`delete_${messagePrefix}mcp_server`, {
+        id: deletingServer.id,
+        scope
+      });
       if (!isCodexMode) {
         addToast(`${t('mcp.deleted')} ${deletingServer.name || deletingServer.id}`, 'success');
         setTimeout(() => loadServers(), 100);
@@ -100,16 +211,20 @@ export function useServerActions({
   // Save server
   const handleSaveServer = useCallback((server: McpServer) => {
     if (editingServer) {
+      // Include scope for delete/update operations to target the correct config
+      const editingScope = editingServer.source === 'project' ? 'project' : 'global';
+      const newScope = server.source === 'project' ? 'project' : 'global';
+
       if (editingServer.id !== server.id) {
         if (isCodexMode) {
           sendToJava('update_codex_mcp_server', { ...server, oldId: editingServer.id });
         } else {
-          sendToJava(`delete_${messagePrefix}mcp_server`, { id: editingServer.id });
-          sendToJava(`add_${messagePrefix}mcp_server`, server);
+          sendToJava(`delete_${messagePrefix}mcp_server`, { id: editingServer.id, scope: editingScope });
+          sendToJava(`add_${messagePrefix}mcp_server`, { ...server, scope: newScope });
           addToast(`${t('mcp.updated')} ${server.name || server.id}`, 'success');
         }
       } else {
-        sendToJava(`update_${messagePrefix}mcp_server`, server);
+        sendToJava(`update_${messagePrefix}mcp_server`, { ...server, scope: editingScope });
         if (!isCodexMode) {
           addToast(`${t('mcp.saved')} ${server.name || server.id}`, 'success');
         }
@@ -167,8 +282,9 @@ export function useServerActions({
 
   // Copy server config (redact sensitive values in env/headers)
   const handleCopyConfig = useCallback(async (server: McpServer) => {
-    const { env, headers, ...safeFields } = server.server;
+    const { env, headers, args, url, ...safeFields } = server.server;
     const serverConfig: Record<string, unknown> = { ...safeFields };
+    let redacted = false;
     if (env) {
       serverConfig.env = Object.fromEntries(
         Object.keys(env).map(k => [k, '***'])
@@ -179,6 +295,16 @@ export function useServerActions({
         Object.keys(headers).map(k => [k, '***'])
       );
     }
+    if (Array.isArray(args)) {
+      const result = redactArgs(args);
+      serverConfig.args = result.args;
+      redacted = redacted || result.redacted;
+    }
+    if (typeof url === 'string' && url) {
+      const result = redactUrl(url);
+      serverConfig.url = result.url;
+      redacted = redacted || result.redacted;
+    }
     const config = {
       mcpServers: {
         [server.id]: serverConfig,
@@ -187,7 +313,7 @@ export function useServerActions({
     const jsonContent = JSON.stringify(config, null, 2);
     const success = await copyToClipboard(jsonContent);
     if (success) {
-      addToast(t('mcp.configCopied'), 'success');
+      addToast(redacted ? t('mcp.configCopiedRedacted') : t('mcp.configCopied'), 'success');
     } else {
       addToast(t('mcp.copyFailed'), 'error');
     }

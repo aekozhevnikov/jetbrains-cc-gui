@@ -6,6 +6,20 @@
 import type { McpServer, McpServerStatusInfo } from '../types';
 
 // ============================================================================
+// Server Card Key
+// ============================================================================
+
+/**
+ * Get a stable card key for a server.
+ * For project-local servers (source === 'project'), the key includes the scope
+ * to distinguish them from global servers with the same ID.
+ * For global servers, the key is just the server ID.
+ */
+export function getServerCardKey(server: McpServer): string {
+  return server.source === 'project' ? `${server.id}::project` : server.id;
+}
+
+// ============================================================================
 // Icon color configuration
 // ============================================================================
 
