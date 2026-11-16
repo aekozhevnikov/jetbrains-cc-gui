@@ -15,6 +15,7 @@ import {
   removeRuntime,
   touchRuntime
 } from './runtime-registry.js';
+import { createHash } from 'node:crypto';
 
 let cachedQueryFn = null;
 
@@ -164,10 +165,68 @@ export function createTurnSink() {
   };
 }
 
-export function buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch, modelId) {
+/**
+ * Compute a stable fingerprint of an object using SHA-256.
+ * @param {*} obj - Object to fingerprint
+ * @returns {string} SHA-256 hex digest (first 16 chars for compactness)
+ */
+function computeFingerprint(obj) {
+  const canonicalJson = JSON.stringify(obj, Object.keys(obj).sort());
+  return createHash('sha256').update(canonicalJson, 'utf8').digest('hex').substring(0, 16);
+}
+
+export function buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch, modelId, envVars, mcpServersConfig, envFile) {
+  // Compute env fingerprint: hash of relevant env vars that affect MCP
+  // We include env vars that can affect MCP server behavior
+  const mcpRelevantEnvVars = {};
+  const mcpRelevantKeys = [
+    'ANTHROPIC_API_KEY',
+    'ANTHROPIC_AUTH_TOKEN',
+    'ANTHROPIC_BASE_URL',
+    'ANTHROPIC_MODEL',
+    'ANTHROPIC_DEFAULT_FABLE_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'ANTHROPIC_SMALL_FAST_MODEL',
+    'CLAUDE_CODE_USE_BEDROCK',
+    'CLAUDE_CODE_USE_VERTEX',
+    'CLAUDE_CODE_USE_FOUNDRY',
+    'CLAUDE_CODE_SUBAGENT_MODEL',
+    'CLAUDE_CODE_EFFORT_LEVEL',
+    'MAX_THINKING_TOKENS',
+    'CLAUDE_CODE_DISABLE_1M_CONTEXT',
+    'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+    'ANTHROPIC_AUTH_TOKEN',
+    'AWS_PROFILE',
+    'AWS_REGION',
+    'AWS_ACCESS_KEY_ID',
+    'AWS_SECRET_ACCESS_KEY',
+    'AWS_SESSION_TOKEN',
+    'HTTPS_PROXY',
+    'HTTP_PROXY',
+    'NO_PROXY',
+    'NODE_EXTRA_CA_CERTS',
+    'NODE_TLS_REJECT_UNAUTHORIZED'
+  ];
+  for (const key of mcpRelevantKeys) {
+    if (envVars && envVars[key] !== undefined) {
+      mcpRelevantEnvVars[key] = envVars[key];
+    }
+  }
+  const envFingerprint = computeFingerprint(mcpRelevantEnvVars);
+
+  // Compute mcpServers fingerprint
+  const mcpServersFingerprint = mcpServersConfig
+    ? computeFingerprint(mcpServersConfig)
+    : 'none';
+
+  // Compute additionalDirectories fingerprint
+  const additionalDirsFingerprint = computeFingerprint(options.additionalDirectories || []);
+
   const material = {
     cwd: options.cwd || '',
-    additionalDirectories: options.additionalDirectories || [],
+    additionalDirectoriesFingerprint: additionalDirsFingerprint,
     systemPromptAppend: systemPromptAppend || '',
     streamingEnabled: !!streamingEnabled,
     runtimeSessionEpoch: runtimeSessionEpoch || '',
@@ -186,7 +245,15 @@ export function buildRuntimeSignature(options, systemPromptAppend, streamingEnab
     // Full Auto rebuilds the runtime with the correct launch flag. The other modes
     // (default/plan/acceptEdits/auto) need no launch flag and keep applying live via
     // setPermissionMode, so they intentionally do NOT change the signature.
-    bypassPermissions: options.permissionMode === 'bypassPermissions'
+    bypassPermissions: options.permissionMode === 'bypassPermissions',
+    // Environment fingerprint: changes when relevant env vars change
+    envFingerprint,
+    // MCP servers fingerprint: changes when server config changes
+    mcpFingerprint: mcpServersFingerprint,
+    // Settings fingerprint: changes when settings change
+    settingsFingerprint: additionalDirsFingerprint,
+    // Env file path: changes when env file changes
+    envFile: envFile || 'none'
   };
   return JSON.stringify(material);
 }

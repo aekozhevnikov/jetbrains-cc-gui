@@ -16,6 +16,7 @@ process.env.HOME = tempHome;
 process.env.USERPROFILE = tempHome;
 
 const { loadMcpServersConfigAsRecord, loadMcpServersConfig, getApprovedProjectServers, getDeniedProjectServers, isProjectServerApproved, classifyProjectServerApproval, isProjectServerTrustVerified, getProjectMcpApproval, loadAllMcpServersInfo, loadProjectMcpJson } = await import('./config-loader.js');
+import { resetRealHomeDirCache } from '../../../utils/path-utils.js';
 
 const claudeJsonPath = path.join(tempHome, '.claude.json');
 
@@ -69,8 +70,8 @@ test('loadMcpServersConfigAsRecord returns Record<name, config> for enabled serv
   const result = await loadMcpServersConfigAsRecord();
   assert.ok(result, 'expected a non-null record');
   assert.deepEqual(Object.keys(result).sort(), ['http', 'stdio']);
-  assert.deepEqual(result.stdio, { command: 'node', args: ['server.js'] });
-  assert.deepEqual(result.http, { url: 'http://localhost:3000' });
+  assert.deepEqual(result.stdio, { command: 'node', args: ['server.js'], source: 'global' });
+  assert.deepEqual(result.http, { url: 'http://localhost:3000', source: 'global' });
 });
 
 test('loadMcpServersConfigAsRecord skips invalid server configs but keeps valid ones', async () => {
@@ -251,6 +252,7 @@ function commitProjectLocalSettings(projectDir) {
 
 function cleanupTrustedSettings() {
   try { fs.rmSync(path.join(tempHome, '.claude'), { recursive: true, force: true }); } catch { /* not present */ }
+  resetRealHomeDirCache();
 }
 
 /**
@@ -420,11 +422,11 @@ test('AC9: malformed .mcp.json does not prevent ~/.claude.json servers from load
   }
 });
 
-test('getApprovedProjectServers returns a Set when approved', { skip: GIT_SKIP }, () => {
+test('getApprovedProjectServers returns a Set when approved', { skip: GIT_SKIP }, async () => {
   const projectDir = makeProjectWithMcpJson({ server: { command: 'node' } });
   try {
     makeTrustedProject(projectDir, { enabledMcpjsonServers: ['server'] });
-    const approved = getApprovedProjectServers(projectDir);
+    const approved = await getApprovedProjectServers(projectDir);
     assert.ok(approved instanceof Set, 'should return a Set');
     assert.ok(approved.has('server'), 'should contain the approved server');
   } finally {
@@ -438,11 +440,11 @@ test('getDeniedProjectServers returns null when nothing denied', () => {
   assert.equal(getDeniedProjectServers(null), null);
 });
 
-test('getDeniedProjectServers returns a Set when denied', { skip: GIT_SKIP }, () => {
+test('getDeniedProjectServers returns a Set when denied', { skip: GIT_SKIP }, async () => {
   const projectDir = makeProjectWithMcpJson({ server: { command: 'node' } });
   try {
     makeTrustedProject(projectDir, { disabledMcpjsonServers: ['server'] });
-    const denied = getDeniedProjectServers(projectDir);
+    const denied = await getDeniedProjectServers(projectDir);
     assert.ok(denied instanceof Set, 'should return a Set');
     assert.ok(denied.has('server'), 'should contain the denied server');
   } finally {
@@ -464,16 +466,16 @@ test('isProjectServerApproved returns correct boolean', async () => {
       enabledMcpjsonServers: ['approved_srv'],
       disabledMcpjsonServers: ['denied_srv']
     });
-    assert.equal(isProjectServerApproved('approved_srv', projectDir), true);
-    assert.equal(isProjectServerApproved('denied_srv', projectDir), false);
-    assert.equal(isProjectServerApproved('pending_srv', projectDir), false);
+    assert.equal(await isProjectServerApproved('approved_srv', projectDir), true);
+    assert.equal(await isProjectServerApproved('denied_srv', projectDir), false);
+    assert.equal(await isProjectServerApproved('pending_srv', projectDir), false);
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
     cleanupTrustedSettings();
   }
 });
 
-test('classifyProjectServerApproval returns correct status', { skip: GIT_SKIP }, () => {
+test('classifyProjectServerApproval returns correct status', { skip: GIT_SKIP }, async () => {
   cleanupTrustedSettings();
   const projectDir = makeProjectWithMcpJson({
     approved_srv: { command: 'node' },
@@ -485,9 +487,9 @@ test('classifyProjectServerApproval returns correct status', { skip: GIT_SKIP },
       enabledMcpjsonServers: ['approved_srv'],
       disabledMcpjsonServers: ['denied_srv']
     });
-    assert.equal(classifyProjectServerApproval('approved_srv', projectDir), 'approved');
-    assert.equal(classifyProjectServerApproval('denied_srv', projectDir), 'rejected');
-    assert.equal(classifyProjectServerApproval('pending_srv', projectDir), 'pending');
+    assert.equal(await classifyProjectServerApproval('approved_srv', projectDir), 'approved');
+    assert.equal(await classifyProjectServerApproval('denied_srv', projectDir), 'rejected');
+    assert.equal(await classifyProjectServerApproval('pending_srv', projectDir), 'pending');
   } finally {
     fs.rmSync(projectDir, { recursive: true, force: true });
     cleanupTrustedSettings();

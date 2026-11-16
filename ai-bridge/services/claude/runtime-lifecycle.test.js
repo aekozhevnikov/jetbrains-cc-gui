@@ -840,11 +840,11 @@ test('buildRuntimeSignature includes envFingerprint for env changes', () => {
   const baseOptions = { cwd: '/w', model: 'sonnet' };
 
   // Same options but different env should produce different signatures
-  const options1 = { ...baseOptions, env: { API_KEY: 'key1' } };
-  const options2 = { ...baseOptions, env: { API_KEY: 'key2' } };
+  const envVars1 = { ANTHROPIC_API_KEY: 'key1' };
+  const envVars2 = { ANTHROPIC_API_KEY: 'key2' };
 
-  const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
-  const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
+  const sig1 = buildRuntimeSignature(baseOptions, '', true, 'ep', 'model', envVars1, null, null);
+  const sig2 = buildRuntimeSignature(baseOptions, '', true, 'ep', 'model', envVars2, null, null);
 
   // Different env should produce different signatures
   assert.notEqual(sig1, sig2);
@@ -855,11 +855,11 @@ test('buildRuntimeSignature includes envFingerprint for env changes', () => {
 test('buildRuntimeSignature includes mcpFingerprint for MCP config changes', () => {
   const baseOptions = { cwd: '/w', model: 'sonnet' };
 
-  const options1 = { ...baseOptions, mcpServers: { server1: { command: 'node' } } };
-  const options2 = { ...baseOptions, mcpServers: { server2: { command: 'python' } } };
+  const mcpServers1 = { server1: { command: 'node' } };
+  const mcpServers2 = { server2: { command: 'python' } };
 
-  const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
-  const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
+  const sig1 = buildRuntimeSignature(baseOptions, '', true, 'ep', 'model', {}, mcpServers1, null);
+  const sig2 = buildRuntimeSignature(baseOptions, '', true, 'ep', 'model', {}, mcpServers2, null);
 
   assert.notEqual(sig1, sig2);
   assert.match(sig1, /"mcpFingerprint"/);
@@ -867,10 +867,11 @@ test('buildRuntimeSignature includes mcpFingerprint for MCP config changes', () 
 });
 
 test('buildRuntimeSignature includes settingsFingerprint for settings changes', () => {
+  // settingsFingerprint is now based on additionalDirectories
   const baseOptions = { cwd: '/w', model: 'sonnet' };
 
-  const options1 = { ...baseOptions, settings: { env: { VAR: 'val1' } } };
-  const options2 = { ...baseOptions, settings: { env: { VAR: 'val2' } } };
+  const options1 = { ...baseOptions, additionalDirectories: ['/path1'] };
+  const options2 = { ...baseOptions, additionalDirectories: ['/path2'] };
 
   const sig1 = buildRuntimeSignature(options1, '', true, 'ep', 'model');
   const sig2 = buildRuntimeSignature(options2, '', true, 'ep', 'model');
@@ -881,16 +882,16 @@ test('buildRuntimeSignature includes settingsFingerprint for settings changes', 
 });
 
 test('buildRuntimeSignature stable for identical env/MCP/settings', () => {
+  const envVars = { ANTHROPIC_API_KEY: 'key1' };
+  const mcpServers = { s1: { command: 'node' } };
   const options = {
     cwd: '/w',
     model: 'sonnet',
-    env: { API_KEY: 'key1' },
-    mcpServers: { s1: { command: 'node' } },
-    settings: { env: { VAR: 'val' } }
+    additionalDirectories: ['/path1']
   };
 
-  const sig1 = buildRuntimeSignature(options, '', true, 'ep', 'model');
-  const sig2 = buildRuntimeSignature(options, '', true, 'ep', 'model');
+  const sig1 = buildRuntimeSignature(options, '', true, 'ep', 'model', envVars, mcpServers, null);
+  const sig2 = buildRuntimeSignature(options, '', true, 'ep', 'model', envVars, mcpServers, null);
 
   assert.equal(sig1, sig2);
 });

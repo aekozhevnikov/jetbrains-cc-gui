@@ -321,8 +321,9 @@ public class McpServerHandler extends BaseMessageHandler {
             Gson gson = new Gson();
             JsonObject json = gson.fromJson(content, JsonObject.class);
             String serverId = json.get("id").getAsString();
+            String scope = json.has("scope") ? json.get("scope").getAsString() : "global";
 
-            boolean success = context.getSettingsService().deleteMcpServer(serverId);
+            boolean success = context.getSettingsService().deleteMcpServer(serverId, scope);
 
             if (success) {
                 ApplicationManager.getApplication().invokeLater(() -> {

@@ -1484,7 +1484,11 @@ public class CodemossSettingsService {
     }
 
     public boolean deleteMcpServer(String serverId) throws IOException {
-        return withConfigTransaction(() -> mcpServerManager.deleteMcpServer(serverId));
+        return deleteMcpServer(serverId, "global");
+    }
+
+    public boolean deleteMcpServer(String serverId, String scope) throws IOException {
+        return withConfigTransaction(() -> mcpServerManager.deleteMcpServer(serverId, scope));
     }
 
     public Map<String, Object> validateMcpServer(JsonObject server) {

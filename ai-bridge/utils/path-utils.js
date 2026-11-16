@@ -38,6 +38,13 @@ export function getRealHomeDir() {
 }
 
 /**
+ * Reset the cached home directory. Useful for tests that override HOME.
+ */
+export function resetRealHomeDirCache() {
+  cachedRealHomeDir = null;
+}
+
+/**
  * Whether the module identified by selfUrl is the process entry script.
  *
  * The naive `import.meta.url === pathToFileURL(process.argv[1]).href` breaks

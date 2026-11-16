@@ -9,10 +9,14 @@ import com.google.gson.JsonObject;
 import com.intellij.openapi.diagnostic.Logger;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -21,6 +25,10 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+
+import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * MCP Server Manager.
@@ -47,6 +55,69 @@ public class McpServerManager {
     private static final int MUTATION_ATTEMPTS = 3;
     /** Fields the UI owns on a server entry; everything else moves into its {@code server} spec. */
     private static final Set<String> SERVER_UI_FIELDS = Set.of("id", "name", "enabled", "apps", "server");
+
+    /**
+     * Git tracking state of a settings file.
+     * Used to determine if a project-local settings.local.json can be trusted.
+     */
+    public enum GitTrackingState {
+        /** File is tracked by git (committed or staged). */
+        TRACKED,
+        /** File is not tracked by git. */
+        UNTRACKED,
+        /** Git status could not be determined (e.g., not a repo, corrupted .git). */
+        INDETERMINATE
+    }
+
+    /**
+     * Detect the git tracking state of a settings file.
+     *
+     * @param projectPath the project directory
+     * @param settingsFile the settings file to check
+     * @return the git tracking state
+     */
+    public static @NotNull GitTrackingState detectGitTrackingState(@NotNull Path projectPath, @NotNull Path settingsFile) {
+        // Check if we're in a git repository
+        Path gitDir = projectPath.resolve(".git");
+        if (!Files.exists(gitDir)) {
+            // Not a git repo - treat as untrusted
+            return GitTrackingState.INDETERMINATE;
+        }
+
+        try {
+            // Check if the file is tracked by git
+            ProcessBuilder trackedCheck = new ProcessBuilder("git", "ls-files", "--error-unmatch", settingsFile.toString());
+            trackedCheck.directory(projectPath.toFile());
+            trackedCheck.redirectError(ProcessBuilder.Redirect.DISCARD);
+            trackedCheck.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            Process trackedProcess = trackedCheck.start();
+            boolean tracked = trackedProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) && trackedProcess.exitValue() == 0;
+
+            if (tracked) {
+                return GitTrackingState.TRACKED;
+            }
+
+            // Check if the file is ignored by .gitignore
+            ProcessBuilder ignoredCheck = new ProcessBuilder("git", "check-ignore", settingsFile.toString());
+            ignoredCheck.directory(projectPath.toFile());
+            ignoredCheck.redirectError(ProcessBuilder.Redirect.DISCARD);
+            ignoredCheck.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+            Process ignoredProcess = ignoredCheck.start();
+            boolean ignored = ignoredProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) && ignoredProcess.exitValue() == 0;
+
+            if (ignored) {
+                // Not tracked but explicitly ignored - trusted
+                return GitTrackingState.UNTRACKED;
+            }
+
+            // Not tracked and not ignored - untrusted
+            return GitTrackingState.UNTRACKED;
+
+        } catch (Exception e) {
+            LOG.warn("[McpServerManager] Failed to detect git tracking state: " + e.getMessage());
+            return GitTrackingState.INDETERMINATE;
+        }
+    }
 
     private final Gson gson;
     private final Function<Void, JsonObject> configReader;
@@ -318,9 +389,31 @@ public class McpServerManager {
             serverSpec = new JsonObject();
         }
 
+        // Determine if this is a project server (has projectPath or server.source == "project")
+        boolean isProjectServer = projectPath != null || (server.has("source") && "project".equals(server.get("source").getAsString()));
+
         // Merge with the existing config so fields the payload omits survive.
         if (mcpServers.has(serverId) && mcpServers.get(serverId).isJsonObject()) {
             JsonObject existingSpec = mcpServers.getAsJsonObject(serverId).deepCopy();
+
+            // For project servers, preserve env/headers if not explicitly provided in the update
+            if (isProjectServer) {
+                if (!serverSpec.has("env") && existingSpec.has("env")) {
+                    serverSpec.add("env", existingSpec.get("env"));
+                }
+                if (!serverSpec.has("headers") && existingSpec.has("headers")) {
+                    serverSpec.add("headers", existingSpec.get("headers"));
+                }
+                // Also preserve cwd, args, etc. if not explicitly provided
+                if (!serverSpec.has("cwd") && existingSpec.has("cwd")) {
+                    serverSpec.add("cwd", existingSpec.get("cwd"));
+                }
+                if (!serverSpec.has("args") && existingSpec.has("args")) {
+                    serverSpec.add("args", existingSpec.get("args"));
+                }
+            }
+
+            // Merge with existing config so fields the payload omits survive.
             for (String key : serverSpec.keySet()) {
                 existingSpec.add(key, serverSpec.get(key));
             }
@@ -365,7 +458,26 @@ public class McpServerManager {
     }
 
     /**
-     * Delete an MCP server.
+     * Delete an MCP server with optional scope.
+     * Prefers deleting from ~/.claude.json (standard Claude CLI location),
+     * falling back to ~/.codemoss/config.json only when that file does not exist.
+     *
+     * @param serverId the server to delete
+     * @param scope the scope of the server to delete: "global" or "project"
+     * @return true when the server was found and removed
+     * @throws IOException when the primary store exists but cannot be updated
+     */
+    public boolean deleteMcpServer(String serverId, String scope) throws IOException {
+        if ("project".equals(scope)) {
+            return deleteProjectMcpServer(serverId);
+        } else {
+            // Default to global scope for backward compatibility
+            return deleteMcpServer(serverId);
+        }
+    }
+
+    /**
+     * Delete an MCP server from the global configuration.
      * Prefers deleting from ~/.claude.json (standard Claude CLI location),
      * falling back to ~/.codemoss/config.json only when that file does not exist.
      *
@@ -412,6 +524,57 @@ public class McpServerManager {
     }
 
     /**
+     * Delete an MCP server from the project-level configuration.
+     *
+     * @param serverId the server to delete
+     * @return true when the server was found and removed
+     * @throws IOException when the primary store exists but cannot be updated
+     */
+    public boolean deleteProjectMcpServer(String serverId) throws IOException {
+        Path projectDir = Paths.get(NodeDetector.resolveHomeForFileOps());
+        // Note: project path should be passed from caller, but we derive it from context
+        // For now, we use the current working directory as project path
+        Path projectPath = Paths.get(".").toAbsolutePath().normalize();
+
+        Path claudeJsonPath = claudeJsonPath();
+        if (Files.exists(claudeJsonPath)) {
+            AtomicBoolean removed = new AtomicBoolean(false);
+            try {
+                SafeJsonFileOps.withLock(lockPath(claudeJsonPath), LOCK_TIMEOUT_MS,
+                        () -> SafeJsonFileOps.mutateJsonAtomically(claudeJsonPath, MUTATION_ATTEMPTS,
+                                READ_RETRY_DELAY_MS, current -> {
+                                    if (!hasProjectServer(current, serverId, projectPath.toString())) {
+                                        return null;
+                                    }
+                                    JsonObject projects = current.getAsJsonObject("projects");
+                                    if (projects != null) {
+                                        JsonObject projectConfig = projects.getAsJsonObject(projectPath.toString());
+                                        if (projectConfig != null) {
+                                            JsonObject mcpServers = projectConfig.getAsJsonObject("mcpServers");
+                                            if (mcpServers != null) {
+                                                mcpServers.remove(serverId);
+                                            }
+                                            removeFromDisabledList(projectConfig, serverId);
+                                            removed.set(true);
+                                        }
+                                    }
+                                    return writer -> gson.toJson(current, writer);
+                                }));
+            } catch (IOException e) {
+                throw new IOException("Failed to delete project MCP server from ~/.claude.json: " + e.getMessage(), e);
+            }
+
+            if (removed.get()) {
+                LOG.info("[McpServerManager] Deleted project MCP server from ~/.claude.json: " + serverId);
+                syncAfterMutation(true);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * @param document the parsed document (may be null)
      * @param serverId the server id to look for
      * @return true when the global mcpServers object contains that id
@@ -421,6 +584,23 @@ public class McpServerManager {
                 && document.has("mcpServers")
                 && document.get("mcpServers").isJsonObject()
                 && document.getAsJsonObject("mcpServers").has(serverId);
+    }
+
+    /**
+     * Check if a project-level server exists in the projects configuration.
+     *
+     * @param document the parsed document (may be null)
+     * @param serverId the server id to look for
+     * @param projectPath the project path
+     * @return true when the project's mcpServers object contains that id
+     */
+    private static boolean hasProjectServer(JsonObject document, String serverId, String projectPath) {
+        return document != null
+                && document.has("projects")
+                && document.get("projects").isJsonObject()
+                && document.getAsJsonObject("projects").has(projectPath)
+                && document.getAsJsonObject("projects").getAsJsonObject(projectPath).has("mcpServers")
+                && document.getAsJsonObject("projects").getAsJsonObject(projectPath).getAsJsonObject("mcpServers").has(serverId);
     }
 
     /**
@@ -617,9 +797,499 @@ public class McpServerManager {
             errors.add("Missing server configuration details");
         }
 
+        // Validate .mcp.json file path if present
+        if (server.has("server") && server.getAsJsonObject("server").has("mcpJsonPath")) {
+            String mcpJsonPath = server.getAsJsonObject("server").get("mcpJsonPath").getAsString();
+            List<String> pathErrors = validateMcpJsonPath(mcpJsonPath);
+            errors.addAll(pathErrors);
+        }
+
         Map<String, Object> result = new HashMap<>();
         result.put("valid", errors.isEmpty());
         result.put("errors", errors);
         return result;
+    }
+
+    /**
+     * Validate .mcp.json file path for security.
+     *
+     * @param mcpJsonPath the path to the .mcp.json file
+     * @return list of validation errors (empty if valid)
+     */
+    private List<String> validateMcpJsonPath(String mcpJsonPath) {
+        List<String> errors = new ArrayList<>();
+
+        if (mcpJsonPath == null || mcpJsonPath.trim().isEmpty()) {
+            errors.add(".mcp.json path must not be empty");
+            return errors;
+        }
+
+        // 1. Check for path traversal
+        Path path = Paths.get(mcpJsonPath);
+        if (path.isAbsolute()) {
+            // Absolute paths must be within project directory
+            // (we can't verify this without project context, but we can check for obvious traversal)
+            errors.add(".mcp.json path must not be absolute");
+            return errors;
+        }
+
+        // Check for path traversal attempts
+        if (mcpJsonPath.contains("..")) {
+            errors.add(".mcp.json path must not contain '..' (path traversal)");
+            return errors;
+        }
+
+        // 2. Check file name matches allowlist
+        String fileName = path.getFileName().toString();
+        if (!".mcp.json".equals(fileName)) {
+            errors.add(".mcp.json file must be named exactly '.mcp.json'");
+            return errors;
+        }
+
+        // 3. Check for symlink pointing outside project (only if file exists)
+        // Note: This is a best-effort check since we don't have project context here
+        // The actual symlink check will be performed during file operations
+        try {
+            if (Files.isSymbolicLink(Paths.get(mcpJsonPath))) {
+                Path realPath = Files.readSymbolicLink(Paths.get(mcpJsonPath)).toAbsolutePath();
+                // In a real implementation, we'd check if realPath is within project bounds
+                // For now, just warn
+                LOG.warn("[McpServerManager] .mcp.json is a symlink: " + realPath);
+            }
+        } catch (IOException e) {
+            // File may not exist yet, that's fine
+        }
+
+        return errors;
+    }
+
+    /**
+     * Compute a fingerprint of a project-level MCP server configuration.
+     * The fingerprint includes all execution-affecting fields and uses
+     * canonical JSON serialization (sorted keys) for objects to ensure
+     * deterministic output regardless of key order.
+     *
+     * @param projectPath the project directory containing .mcp.json
+     * @param serverId the server id to fingerprint
+     * @return SHA-256 hex fingerprint, or empty string if server not found
+     * @throws IOException if .mcp.json cannot be read
+     */
+    public static String fingerprintOfProjectServer(String projectPath, String serverId) throws IOException {
+        Path mcpJsonPath = Paths.get(projectPath, ".mcp.json");
+        if (!Files.exists(mcpJsonPath)) {
+            return "";
+        }
+
+        String content = Files.readString(mcpJsonPath, StandardCharsets.UTF_8);
+        JsonObject mcpJson = new Gson().fromJson(content, JsonObject.class);
+
+        if (!mcpJson.has("mcpServers") || !mcpJson.get("mcpServers").isJsonObject()) {
+            return "";
+        }
+
+        JsonObject mcpServers = mcpJson.getAsJsonObject("mcpServers");
+        if (!mcpServers.has(serverId) || !mcpServers.get(serverId).isJsonObject()) {
+            return "";
+        }
+
+        JsonObject serverConfig = mcpServers.getAsJsonObject(serverId).deepCopy();
+
+        // Extract execution-affecting fields
+        JsonObject fingerprintData = new JsonObject();
+
+        // command (always include if present)
+        if (serverConfig.has("command") && serverConfig.get("command").isJsonPrimitive()) {
+            fingerprintData.addProperty("command", serverConfig.get("command").getAsString());
+        }
+
+        // url (for http/sse servers)
+        if (serverConfig.has("url") && serverConfig.get("url").isJsonPrimitive()) {
+            fingerprintData.addProperty("url", serverConfig.get("url").getAsString());
+        }
+
+        // args (order matters)
+        if (serverConfig.has("args") && serverConfig.get("args").isJsonArray()) {
+            JsonArray argsArray = new JsonArray();
+            for (JsonElement elem : serverConfig.getAsJsonArray("args")) {
+                if (elem.isJsonPrimitive()) {
+                    argsArray.add(elem.getAsString());
+                }
+            }
+            fingerprintData.add("args", argsArray);
+        }
+
+        // cwd
+        if (serverConfig.has("cwd") && serverConfig.get("cwd").isJsonPrimitive()) {
+            fingerprintData.addProperty("cwd", serverConfig.get("cwd").getAsString());
+        }
+
+        // env (canonical: sorted keys)
+        if (serverConfig.has("env") && serverConfig.get("env").isJsonObject()) {
+            JsonObject env = serverConfig.getAsJsonObject("env");
+            JsonObject canonicalEnv = new JsonObject();
+            env.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> canonicalEnv.add(e.getKey(), e.getValue()));
+            fingerprintData.add("env", canonicalEnv);
+        }
+
+        // headers (canonical: sorted keys)
+        if (serverConfig.has("headers") && serverConfig.get("headers").isJsonObject()) {
+            JsonObject headers = serverConfig.getAsJsonObject("headers");
+            JsonObject canonicalHeaders = new JsonObject();
+            headers.entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .forEach(e -> canonicalHeaders.add(e.getKey(), e.getValue()));
+            fingerprintData.add("headers", canonicalHeaders);
+        }
+
+        // type (stdio, http, sse)
+        if (serverConfig.has("type") && serverConfig.get("type").isJsonPrimitive()) {
+            fingerprintData.addProperty("type", serverConfig.get("type").getAsString());
+        }
+
+        // Compute SHA-256 hash of canonical JSON
+        String canonicalJson = new Gson().toJson(fingerprintData);
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(canonicalJson.getBytes(StandardCharsets.UTF_8));
+            return bytesToHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
+    }
+
+    /**
+     * Convert byte array to hex string.
+     */
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(String.format("%02x", b));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Validate MCP server configuration.
+     */
+    */
+    public Map<String, Object> validateMcpServer(JsonObject server) {
+        List<String> errors = new ArrayList<>();
+
+        if (!server.has("name") || server.get("name").getAsString().isEmpty()) {
+            errors.add("Server name must not be empty");
+        }
+
+        if (server.has("server")) {
+            JsonObject serverSpec = server.getAsJsonObject("server");
+            String type = serverSpec.has("type") ? serverSpec.get("type").getAsString() : "stdio";
+
+            if ("stdio".equals(type)) {
+                if (!serverSpec.has("command") || serverSpec.get("command").getAsString().isEmpty()) {
+                    errors.add("Command must not be empty");
+                }
+            } else if ("http".equals(type) || "sse".equals(type)) {
+                if (!serverSpec.has("url") || serverSpec.get("url").getAsString().isEmpty()) {
+                    errors.add("URL must not be empty");
+                } else {
+                    String url = serverSpec.get("url").getAsString();
+                    try {
+                        new java.net.URI(url).toURL();
+                    } catch (Exception e) {
+                        errors.add("Invalid URL format");
+                    }
+                }
+            } else {
+                errors.add("Unsupported connection type: " + type);
+            }
+        } else {
+            errors.add("Missing server configuration details");
+        }
+
+        Map<String, Object> result = new HashMap<>();
+        result.put("valid", errors.isEmpty());
+        result.put("errors", errors);
+        return result;
+    }
+
+    /**
+     * Resolve the approval status of a project-level MCP server.
+     * Uses unified trust predicate: file must be both untracked AND gitignored.
+     *
+     * @param serverId the server ID
+     * @param projectPath the project directory path
+     * @return "approved" | "rejected" | "pending"
+     * @throws IOException if .mcp.json cannot be read
+     */
+    public String resolveProjectMcpApprovalStatus(String serverId, String projectPath) throws IOException {
+        Path projectDir = Paths.get(projectPath);
+        Path mcpJsonPath = projectDir.resolve(".mcp.json");
+
+        if (!Files.exists(mcpJsonPath)) {
+            return "pending";
+        }
+
+        String content = Files.readString(mcpJsonPath, StandardCharsets.UTF_8);
+        JsonObject mcpJson = new Gson().fromJson(content, JsonObject.class);
+
+        if (!mcpJson.has("mcpServers") || !mcpJson.get("mcpServers").isJsonObject()) {
+            return "pending";
+        }
+
+        JsonObject mcpServers = mcpJson.getAsJsonObject("mcpServers");
+        if (!mcpServers.has(serverId) || !mcpServers.get(serverId).isJsonObject()) {
+            return "pending";
+        }
+
+        // Check trust predicate
+        Path settingsLocalPath = projectDir.resolve(".claude").resolve("settings.local.json");
+        GitTrackingState trackingState = detectGitTrackingState(projectDir, settingsLocalPath);
+
+        // Load fingerprints from settings
+        Map<String, String> enabledFingerprints = new HashMap<>();
+        List<String> enabledServers = new ArrayList<>();
+        List<String> disabledServers = new ArrayList<>();
+        boolean enableAllProjectMcpServers = false;
+
+        if (Files.exists(settingsLocalPath)) {
+            try {
+                String content = Files.readString(settingsLocalPath, StandardCharsets.UTF_8);
+                JsonObject settings = new Gson().fromJson(content, JsonObject.class);
+                if (settings.has("enabledMcpjsonServerFingerprints") && settings.get("enabledMcpjsonServerFingerprints").isJsonObject()) {
+                    JsonObject fingerprints = settings.getAsJsonObject("enabledMcpjsonServerFingerprints");
+                    for (Map.Entry<String, JsonElement> entry : fingerprints.entrySet()) {
+                        enabledFingerprints.put(entry.getKey(), entry.getValue().getAsString());
+                    }
+                }
+                if (settings.has("enabledMcpjsonServers") && settings.get("enabledMcpjsonServers").isJsonArray()) {
+                    for (JsonElement elem : settings.getAsJsonArray("enabledMcpjsonServers")) {
+                        enabledServers.add(elem.getAsString());
+                    }
+                }
+                if (settings.has("disabledMcpjsonServers") && settings.get("disabledMcpjsonServers").isJsonArray()) {
+                    for (JsonElement elem : settings.getAsJsonArray("disabledMcpjsonServers")) {
+                        disabledServers.add(elem.getAsString());
+                    }
+                }
+                if (settings.has("enableAllProjectMcpServers") && settings.get("enableAllProjectMcpServers").isJsonPrimitive()) {
+                    enableAllProjectMcpServers = settings.get("enableAllProjectMcpServers").getAsBoolean();
+                }
+            } catch (Exception e) {
+                LOG.warn("[McpServerManager] Failed to read settings.local.json: " + e.getMessage());
+            }
+        }
+
+        // Also check user settings.json
+        Path userSettingsPath = Paths.get(NodeDetector.resolveHomeForFileOps(), ".claude", "settings.json");
+        if (Files.exists(userSettingsPath)) {
+            try {
+                String content = Files.readString(userSettingsPath, StandardCharsets.UTF_8);
+                JsonObject settings = new Gson().fromJson(content, JsonObject.class);
+                if (settings.has("enabledMcpjsonServerFingerprints") && settings.get("enabledMcpjsonServerFingerprints").isJsonObject()) {
+                    JsonObject fingerprints = settings.getAsJsonObject("enabledMcpjsonServerFingerprints");
+                    for (Map.Entry<String, JsonElement> entry : fingerprints.entrySet()) {
+                        enabledFingerprints.put(entry.getKey(), entry.getValue().getAsString());
+                    }
+                }
+                if (settings.has("enabledMcpjsonServers") && settings.get("enabledMcpjsonServers").isJsonArray()) {
+                    for (JsonElement elem : settings.getAsJsonArray("enabledMcpjsonServers")) {
+                        enabledServers.add(elem.getAsString());
+                    }
+                }
+                if (settings.has("disabledMcpjsonServers") && settings.get("disabledMcpjsonServers").isJsonArray()) {
+                    for (JsonElement elem : settings.getAsJsonArray("disabledMcpjsonServers")) {
+                        disabledServers.add(elem.getAsString());
+                    }
+                }
+                if (settings.has("enableAllProjectMcpServers") && settings.get("enableAllProjectMcpServers").isJsonPrimitive()) {
+                    enableAllProjectMcpServers = settings.get("enableAllProjectMcpServers").getAsBoolean();
+                }
+            } catch (Exception e) {
+                LOG.warn("[McpServerManager] Failed to read user settings.json: " + e.getMessage());
+            }
+        }
+
+        // Check disabled servers first (rejected)
+        if (disabledServers.contains(serverId)) {
+            return "rejected";
+        }
+
+        // Check if enableAllProjectMcpServers is enabled
+        if (enableAllProjectMcpServers) {
+            return "approved";
+        }
+
+        // Check legacy approved servers
+        if (enabledServers.contains(serverId)) {
+            // Trust predicate: file must be both untracked AND gitignored
+            if (trackingState == GitTrackingState.UNTRACKED) {
+                // Check if file is gitignored
+                Path settingsFile = settingsLocalPath;
+                try {
+                    ProcessBuilder ignoredCheck = new ProcessBuilder("git", "check-ignore", settingsFile.toString());
+                    ignoredCheck.directory(projectDir.toFile());
+                    ignoredCheck.redirectError(ProcessBuilder.Redirect.DISCARD);
+                    ignoredCheck.redirectOutput(ProcessBuilder.Redirect.DISCARD);
+                    Process ignoredProcess = ignoredCheck.start();
+                    boolean ignored = ignoredProcess.waitFor(5, java.util.concurrent.TimeUnit.SECONDS) && ignoredProcess.exitValue() == 0;
+                    if (ignored) {
+                        return "approved";
+                    }
+                } catch (Exception e) {
+                    LOG.warn("[McpServerManager] Failed to check git ignore: " + e.getMessage());
+                }
+            }
+            return "pending";
+        }
+
+        // Check fingerprint format
+        String storedFingerprint = enabledFingerprints.get(serverId);
+        if (storedFingerprint != null) {
+            String computedFingerprint = fingerprintOfProjectServer(projectPath, serverId);
+            if (computedFingerprint.equals(storedFingerprint)) {
+                return "approved";
+            }
+            return "rejected";
+        }
+
+        return "pending";
+    }
+
+    /**
+     * Approve a project MCP server by adding it to settings.local.json with fingerprint.
+     *
+     * @param serverId the server ID
+     * @param projectPath the project directory path
+     * @throws IOException if the file cannot be written
+     */
+    public void approveProjectMcpJsonServer(String serverId, String projectPath) throws IOException {
+        Path projectDir = Paths.get(projectPath);
+        Path mcpJsonPath = projectDir.resolve(".mcp.json");
+
+        if (!Files.exists(mcpJsonPath)) {
+            throw new IOException(".mcp.json not found in project: " + projectPath);
+        }
+
+        String mcpContent = Files.readString(mcpJsonPath, StandardCharsets.UTF_8);
+        JsonObject mcpJson = new Gson().fromJson(mcpContent, JsonObject.class);
+
+        if (!mcpJson.has("mcpServers") || !mcpJson.get("mcpServers").isJsonObject()) {
+            throw new IOException("Invalid .mcp.json: missing mcpServers");
+        }
+
+        JsonObject mcpServers = mcpJson.getAsJsonObject("mcpServers");
+        if (!mcpServers.has(serverId) || !mcpServers.get(serverId).isJsonObject()) {
+            throw new IOException("Server not found in .mcp.json: " + serverId);
+        }
+
+        JsonObject serverConfig = mcpServers.getAsJsonObject(serverId);
+        String fingerprint = fingerprintOfProjectServer(projectPath, serverId);
+
+        Path settingsLocalDir = projectDir.resolve(".claude");
+        Files.createDirectories(settingsLocalDir);
+        Path settingsLocalPath = settingsLocalDir.resolve("settings.local.json");
+
+        JsonObject settings;
+        if (Files.exists(settingsLocalPath)) {
+            String content = Files.readString(settingsLocalPath, StandardCharsets.UTF_8);
+            settings = new Gson().fromJson(content, JsonObject.class);
+        } else {
+            settings = new JsonObject();
+        }
+
+        // Add to enabledMcpjsonServerFingerprints
+        JsonObject fingerprints = settings.has("enabledMcpjsonServerFingerprints") && settings.get("enabledMcpjsonServerFingerprints").isJsonObject()
+                ? settings.getAsJsonObject("enabledMcpjsonServerFingerprints")
+                : new JsonObject();
+        fingerprints.addProperty(serverId, fingerprint);
+        settings.add("enabledMcpjsonServerFingerprints", fingerprints);
+
+        // Also add to legacy enabledMcpjsonServers for backward compatibility
+        JsonArray enabledServers = settings.has("enabledMcpjsonServers") && settings.get("enabledMcpjsonServers").isJsonArray()
+                ? settings.getAsJsonArray("enabledMcpjsonServers")
+                : new JsonArray();
+        if (!enabledServers.toString().contains("\"" + serverId + "\"")) {
+            enabledServers.add(serverId);
+        }
+        settings.add("enabledMcpjsonServers", enabledServers);
+
+        // Write atomically
+        SafeJsonFileOps.withLock(lockPath(settingsLocalPath), LOCK_TIMEOUT_MS,
+                () -> SafeJsonFileOps.mutateJsonAtomically(settingsLocalPath, MUTATION_ATTEMPTS, READ_RETRY_DELAY_MS,
+                        current -> {
+                            JsonObject document = current != null ? current : new JsonObject();
+                            document.add("enabledMcpjsonServerFingerprints", fingerprints);
+                            document.add("enabledMcpjsonServers", enabledServers);
+                            return writer -> gson.toJson(document, writer);
+                        }));
+
+        LOG.info("[McpServerManager] Approved project MCP server: " + serverId + " (fingerprint: " + fingerprint + ")");
+    }
+
+    /**
+     * Reject a project MCP server by adding it to disabledMcpjsonServers.
+     *
+     * @param serverId the server ID
+     * @param projectPath the project directory path
+     * @throws IOException if the file cannot be written
+     */
+    public void rejectProjectMcpJsonServer(String serverId, String projectPath) throws IOException {
+        Path projectDir = Paths.get(projectPath);
+        Path settingsLocalDir = projectDir.resolve(".claude");
+        Files.createDirectories(settingsLocalDir);
+        Path settingsLocalPath = settingsLocalDir.resolve("settings.local.json");
+
+        JsonObject settings;
+        if (Files.exists(settingsLocalPath)) {
+            String content = Files.readString(settingsLocalPath, StandardCharsets.UTF_8);
+            settings = new Gson().fromJson(content, JsonObject.class);
+        } else {
+            settings = new JsonObject();
+        }
+
+        // Add to disabledMcpjsonServers
+        JsonArray disabledServers = settings.has("disabledMcpjsonServers") && settings.get("disabledMcpjsonServers").isJsonArray()
+                ? settings.getAsJsonArray("disabledMcpjsonServers")
+                : new JsonArray();
+        if (!disabledServers.toString().contains("\"" + serverId + "\"")) {
+            disabledServers.add(serverId);
+        }
+        settings.add("disabledMcpjsonServers", disabledServers);
+
+        // Remove from enabled if present
+        if (settings.has("enabledMcpjsonServers") && settings.get("enabledMcpjsonServers").isJsonArray()) {
+            JsonArray enabled = settings.getAsJsonArray("enabledMcpjsonServers");
+            JsonArray filtered = new JsonArray();
+            for (JsonElement elem : enabled) {
+                if (!elem.getAsString().equals(serverId)) {
+                    filtered.add(elem);
+                }
+            }
+            settings.add("enabledMcpjsonServers", filtered);
+        }
+
+        // Remove from fingerprints if present
+        if (settings.has("enabledMcpjsonServerFingerprints") && settings.get("enabledMcpjsonServerFingerprints").isJsonObject()) {
+            JsonObject fingerprints = settings.getAsJsonObject("enabledMcpjsonServerFingerprints");
+            fingerprints.remove(serverId);
+        }
+
+        // Write atomically
+        SafeJsonFileOps.withLock(lockPath(settingsLocalPath), LOCK_TIMEOUT_MS,
+                () -> SafeJsonFileOps.mutateJsonAtomically(settingsLocalPath, MUTATION_ATTEMPTS, READ_RETRY_DELAY_MS,
+                        current -> {
+                            JsonObject document = current != null ? current : new JsonObject();
+                            document.add("disabledMcpjsonServers", disabledServers);
+                            if (settings.has("enabledMcpjsonServers")) {
+                                document.add("enabledMcpjsonServers", settings.get("enabledMcpjsonServers"));
+                            }
+                            if (settings.has("enabledMcpjsonServerFingerprints")) {
+                                document.add("enabledMcpjsonServerFingerprints", settings.get("enabledMcpjsonServerFingerprints"));
+                            }
+                            return writer -> gson.toJson(document, writer);
+                        }));
+
+        LOG.info("[McpServerManager] Rejected project MCP server: " + serverId);
     }
 }

@@ -229,7 +229,10 @@ async function buildRequestContext(params, withAttachments, overrides = {}) {
 
   const userMessage = await buildUserMessage(params, withAttachments, requestedSessionId);
 
-  const runtimeSignature = buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch, modelId);
+  const envVars = { ...process.env, ...options.env };
+  const mcpServersConfig = mcpServers || null;
+  const envFile = params.envFile || null;
+  const runtimeSignature = buildRuntimeSignature(options, systemPromptAppend, streamingEnabled, runtimeSessionEpoch, modelId, envVars, mcpServersConfig, envFile);
   console.log('[LIFECYCLE] buildRequestContext sessionId=' + (requestedSessionId || '(new)')
     + ' epoch=' + (runtimeSessionEpoch || '(none)')
     + ' signature=' + runtimeSignature);
