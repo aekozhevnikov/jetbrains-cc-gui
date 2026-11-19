@@ -53,12 +53,13 @@ public enum SessionEntrypoint {
      * <p>The CLI only hides {@code sdk-cli}, {@code sdk-ts}, and {@code sdk-py} sessions
      * from its {@code /resume} list. Converting {@code claude-vscode} sessions rewrites
      * files owned by the VS Code extension without any visible benefit, as the CLI does
-     * not hide them anyway.
+     * not hide them anyway. However, for parity with the auto-converter and batch converter,
+     * we also convert {@code claude-vscode} so all SDK-created sessions become CLI-visible.
      *
      * @return true when conversion to CLI is supported
      */
     public boolean isConvertibleToCli() {
-        return this == SDK_CLI;
+        return this == SDK_CLI || this == CLAUDE_VSCODE;
     }
 
     /**

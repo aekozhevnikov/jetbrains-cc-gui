@@ -11,7 +11,6 @@ import org.jetbrains.annotations.NotNull;
 
 import java.nio.file.Paths;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Converts SDK-created Claude sessions to CLI-recognizable ones when a project opens,
@@ -34,29 +33,9 @@ public class AutoConvertOnStartupListener implements StartupActivity {
         }
 
         // Run on a background thread so we don't block project startup UI
-        StartupManager.getInstance(project).runWhenProjectIsInitialized(() -> {
-            try {
-                new HistoryAutoConvertService(
-                        () -> Paths.get(com.github.claudecodegui.bridge.NodeDetector.resolveHomeForFileOps(), ".claude", "projects"),
-                        () -> {
-                            String basePath = project.getBasePath();
-                            if (basePath == null) {
-                                return Set.of();
-                            }
-                            // Use effective working directory like the batch converter does
-                            String effectivePath = new com.github.claudecodegui.settings.CodemossSettingsService()
-                                    .getEffectiveWorkingDirectory(basePath);
-                            return Set.of(com.github.claudecodegui.util.PathUtils.sanitizePath(
-                                    com.github.claudecodegui.util.PathUtils.realPath(
-                                            com.github.claudecodegui.handler.history.SessionConversionService
-                                                    .resolveProjectPathForFileOps(effectivePath))));
-                        },
-                        () -> Set.of() // No active sessions yet — tabs not restored
-                ).convertAllProjects();
-            } catch (Exception e) {
-                LOG.warn("[AutoConvertOnStartup] Auto conversion failed: " + e.getMessage());
-            }
-        });
+        // runWhenProjectIsInitialized is deprecated but remains the standard API for this use case
+        Runnable runner = () -> runConversion(project);
+        StartupManager.getInstance(project).runWhenProjectIsInitialized(runner);
     }
 
     /**
@@ -69,5 +48,38 @@ public class AutoConvertOnStartupListener implements StartupActivity {
             LOG.warn("[AutoConvertOnStartup] Cannot read the auto-convert setting: " + e.getMessage());
             return false;
         }
+    }
+
+    private void runConversion(Project project) {
+        try {
+            new HistoryAutoConvertService(
+                    () -> Paths.get(com.github.claudecodegui.bridge.NodeDetector.resolveHomeForFileOps(), ".claude", "projects"),
+                    () -> resolveProjectDirForConversion(project),
+                    Set::of // No active sessions yet — tabs not restored
+            ).convertAllProjects();
+        } catch (Exception e) {
+            LOG.warn("[AutoConvertOnStartup] Auto conversion failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Resolves the project directory for conversion.
+     * Mirrors the WSL path resolution logic used by the batch converter.
+     */
+    private Set<String> resolveProjectDirForConversion(Project project) {
+        String basePath = project.getBasePath();
+        if (basePath == null) {
+            return Set.of();
+        }
+        // Use effective working directory like the batch converter does
+        String effectivePath = new CodemossSettingsService()
+                .getEffectiveWorkingDirectory(basePath);
+        // Resolve WSL path if needed
+        String nodePath = com.github.claudecodegui.bridge.NodeDetector.getInstance().getCachedNodePath();
+        String resolved = com.github.claudecodegui.bridge.NodeDetector.isWslPath(nodePath)
+                ? com.github.claudecodegui.bridge.NodeDetector.convertToWslPath(effectivePath)
+                : effectivePath;
+        return Set.of(com.github.claudecodegui.util.PathUtils.sanitizePath(
+                com.github.claudecodegui.util.PathUtils.realPath(resolved)));
     }
 }

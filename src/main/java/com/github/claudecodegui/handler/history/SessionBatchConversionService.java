@@ -85,8 +85,21 @@ class SessionBatchConversionService {
                 () -> context.resolveEffectiveWorkingDirectory(),
                 new SessionConversionService(context)::convertSession,
                 result -> sendBatchResult(context, result),
-                ApplicationManager.getApplication()::executeOnPooledThread
+                getBackgroundExecutor()
         );
+    }
+
+    /**
+     * Returns a background executor, falling back to a simple thread-per-task executor
+     * when the IDE application is not available (e.g., in tests).
+     */
+    private static Executor getBackgroundExecutor() {
+        var app = ApplicationManager.getApplication();
+        if (app != null) {
+            return app::executeOnPooledThread;
+        }
+        // Fallback for test environments without an IDE application
+        return runnable -> new Thread(runnable, "batch-conversion-test").start();
     }
 
     SessionBatchConversionService(
@@ -132,11 +145,10 @@ class SessionBatchConversionService {
         } catch (RuntimeException rejected) {
             // The executor refused the task outright (IDE shutting down). Release the guard,
             // otherwise every later batch would be rejected as "already running" forever.
-            // Send a result back so the frontend button is re-enabled immediately instead of
-            // waiting for the 30s watchdog to fire.
+            // Do NOT send a result: a rejected submission never ran the batch, so it has
+            // nothing to report. The frontend will retry or time out.
             LOG.warn("[SessionBatchConversion] Batch not scheduled: " + rejected.getMessage());
             this.running.set(false);
-            this.resultSink.accept(executorRejectedResult(rejected.getMessage()));
         }
     }
 

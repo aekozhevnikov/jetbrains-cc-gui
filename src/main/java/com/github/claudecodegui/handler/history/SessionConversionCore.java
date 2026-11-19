@@ -1,7 +1,5 @@
 package com.github.claudecodegui.handler.history;
 
-import com.github.claudecodegui.bridge.NodeDetector;
-import com.github.claudecodegui.util.PathUtils;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
@@ -19,7 +17,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.Set;
@@ -48,7 +45,8 @@ final class SessionConversionCore {
     private static final String SESSION_FILE_SUFFIX = ".jsonl";
     private static final String ENTRYPOINT_FIELD = "entrypoint";
     private static final String ENTRYPOINT_CLI = SessionEntrypoint.CLI.getValue();
-    private static final int MAX_ENTRYPOINT_SNIFF_LINES = 50;
+    // VisibleForTesting
+    static final int MAX_ENTRYPOINT_SNIFF_LINES = 50;
     private static final long MAX_SESSION_FILE_SIZE_BYTES = 64L * 1024L * 1024L;
 
     private final Gson gson = new GsonBuilder().disableHtmlEscaping().create();
@@ -60,6 +58,22 @@ final class SessionConversionCore {
             boolean converted,
             ConversionResultCode resultCode
     ) {}
+
+    /**
+     * Functional interface for a consumer that can throw IOException.
+     */
+    @FunctionalInterface
+    interface ThrowingConsumer<T> {
+        void accept(T t) throws IOException;
+    }
+
+    /**
+     * Functional interface for a bi-consumer that can throw IOException.
+     */
+    @FunctionalInterface
+    interface ThrowingBiConsumer<T, U> {
+        void accept(T t, U u) throws IOException;
+    }
 
     /**
      * Convert a session file to CLI entrypoint.
@@ -79,6 +93,19 @@ final class SessionConversionCore {
      * @return outcome with conversion status and result code
      */
     ConversionOutcome convertSessionFile(Path sessionFile, Supplier<Set<String>> activeSessionIdsSupplier) throws IOException {
+        return convertSessionFile(sessionFile, activeSessionIdsSupplier, this::afterCompleteBackup, this::copyBackup);
+    }
+
+    /**
+     * Overload that accepts custom hooks so callers (e.g. {@link HistoryAutoConvertService})
+     * can inject test overrides for both the post-backup and the backup-copy steps.
+     */
+    ConversionOutcome convertSessionFile(
+            Path sessionFile,
+            Supplier<Set<String>> activeSessionIdsSupplier,
+            ThrowingConsumer<Path> afterCompleteBackupHook,
+            ThrowingBiConsumer<Path, Path> copyBackupHook
+    ) throws IOException {
         String fileName = sessionFile.getFileName().toString();
         String sessionId = fileName.substring(0, fileName.length() - SESSION_FILE_SUFFIX.length());
 
@@ -107,15 +134,31 @@ final class SessionConversionCore {
         long sourceMtime = Files.getLastModifiedTime(sessionFile).toMillis();
 
         Path sessionDir = sessionFile.getParent();
+        Path backupFile = SessionTempFiles.createPrivateTempFile(
+                sessionDir, sessionFile.getFileName() + ".backup.", ".tmp");
         Path tempFile = SessionTempFiles.createPrivateTempFile(
                 sessionDir, sessionFile.getFileName() + ".convert.", ".tmp");
 
+        boolean backupComplete = false;
         try {
-            afterCompleteBackup(sessionFile);
+            // Create backup copy
+            copyBackupHook.accept(sessionFile, backupFile);
+            long backupSize = Files.size(backupFile);
+            if (backupSize != sourceSize) {
+                // Backup incomplete (e.g. ENOSPC, partial write) — leave original untouched
+                LOG.warn("[ConversionCore] Backup of " + fileName + " is short ("
+                        + backupSize + " of " + sourceSize + " bytes); leaving the session untouched");
+                Files.deleteIfExists(backupFile);
+                return new ConversionOutcome(false, ConversionResultCode.CONVERSION_FAILED);
+            }
+            backupComplete = true;
+
+            afterCompleteBackupHook.accept(sessionFile);
 
             int modified = rewriteEntrypoint(sessionFile, tempFile);
             if (modified == 0) {
                 Files.deleteIfExists(tempFile);
+                Files.deleteIfExists(backupFile);
                 return new ConversionOutcome(false, ConversionResultCode.NOT_SDK_SESSION);
             }
 
@@ -134,9 +177,42 @@ final class SessionConversionCore {
 
         } catch (IOException e) {
             LOG.warn("[ConversionCore] Failed to convert " + sessionFile + ": " + e.getMessage());
+            // Restore from backup if it was complete
+            if (backupComplete) {
+                try {
+                    long currentSize = Files.size(sessionFile);
+                    if (currentSize <= sourceSize) {
+                        Files.move(backupFile, sessionFile, StandardCopyOption.REPLACE_EXISTING);
+                        LOG.info("[ConversionCore] Restored session from backup after failure");
+                    } else {
+                        LOG.warn("[ConversionCore] " + sessionFile.getFileName()
+                                + " grew after backup (" + currentSize + " > " + sourceSize
+                                + " bytes); not restoring older snapshot");
+                    }
+                } catch (IOException restoreError) {
+                    LOG.error("[ConversionCore] Failed to restore backup: "
+                            + restoreError.getMessage(), restoreError);
+                }
+            }
             Files.deleteIfExists(tempFile);
             return new ConversionOutcome(false, ConversionResultCode.CONVERSION_FAILED);
+        } finally {
+            Files.deleteIfExists(backupFile);
+            Files.deleteIfExists(tempFile);
         }
+    }
+
+    /**
+     * Default backup copy implementation. Split out so tests can simulate a copy that dies
+     * part way through — ENOSPC, EIO, a network share going away — without filling an actual disk.
+     *
+     * @param source session file to copy.
+     * @param backup already-created, empty destination.
+     * @throws IOException if the copy fails, possibly after writing part of the file.
+     */
+    // VisibleForTesting
+    void copyBackup(Path source, Path backup) throws IOException {
+        Files.copy(source, backup, StandardCopyOption.REPLACE_EXISTING);
     }
 
     /**
