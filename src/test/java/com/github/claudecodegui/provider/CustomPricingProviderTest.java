@@ -2,6 +2,8 @@ package com.github.claudecodegui.provider;
 
 import com.github.claudecodegui.settings.ConfigPathManager;
 import com.github.claudecodegui.settings.ModelPricing;
+import com.google.gson.Gson;
+import com.google.gson.JsonObject;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -10,6 +12,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.Assert.assertEquals;
@@ -48,9 +51,9 @@ public class CustomPricingProviderTest {
 
     @Test
     public void shouldKeepExactPricingBeforeRoutePrefixFallback() throws IOException {
-        CustomPricingProvider provider = newProvider(config(String.join(",",
-                entry("pa/gpt-5.5", 1.0),
-                entry("ppio/pa/gpt-5.5", 2.0)
+        CustomPricingProvider provider = newProvider(config(Map.of(
+                "pa/gpt-5.5", 1.0,
+                "ppio/pa/gpt-5.5", 2.0
         )));
 
         Optional<ModelPricing> pricing = provider.getPricing("claude", "pa/gpt-5.5");
@@ -87,9 +90,9 @@ public class CustomPricingProviderTest {
 
     @Test
     public void shouldNotGuessRoutePrefixPricingWhenMultipleCandidatesMatch() throws IOException {
-        CustomPricingProvider provider = newProvider(config(String.join(",",
-                entry("ppio/pa/gpt-5.5", 2.0),
-                entry("openrouter/pa/gpt-5.5", 5.0)
+        CustomPricingProvider provider = newProvider(config(Map.of(
+                "ppio/pa/gpt-5.5", 2.0,
+                "openrouter/pa/gpt-5.5", 5.0
         )));
 
         Optional<ModelPricing> pricing = provider.getPricing("claude", "pa/gpt-5.5");
@@ -103,20 +106,24 @@ public class CustomPricingProviderTest {
         return new CustomPricingProvider(new TestConfigPathManager(configPath));
     }
 
-    private static String config(String claudeEntries) {
-        return """
-                {
-                  "customModelPricing": {
-                    "claude": {
-                      %s
-                    }
-                  }
-                }
-                """.formatted(claudeEntries);
+    private static String config(Map<String, Double> claudeEntries) {
+        JsonObject claudeObj = new JsonObject();
+        for (Map.Entry<String, Double> e : claudeEntries.entrySet()) {
+            JsonObject pricing = new JsonObject();
+            pricing.addProperty("inputCostPer1M", e.getValue());
+            claudeObj.add(e.getKey(), pricing);
+        }
+        JsonObject root = new JsonObject();
+        JsonObject providerObj = new JsonObject();
+        providerObj.add("claude", claudeObj);
+        root.add("customModelPricing", providerObj);
+        return new Gson().toJson(root);
     }
 
-    private static String entry(String modelId, double inputCostPer1M) {
-        return "\"%s\": {\"inputCostPer1M\": %.1f}".formatted(modelId, inputCostPer1M);
+    private static Map<String, Double> entry(String modelId, double inputCostPer1M) {
+        Map<String, Double> map = new java.util.LinkedHashMap<>();
+        map.put(modelId, inputCostPer1M);
+        return map;
     }
 
     private static void assertInputRate(Optional<ModelPricing> pricing, double expected) {
